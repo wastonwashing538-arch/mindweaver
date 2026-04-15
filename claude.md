@@ -156,3 +156,7 @@ interface Conversation {
 
 ## 回复语言
 所有文字回复使用简体中文，技术术语、代码、补充说明可用英文。
+
+## 工作流规范
+- 每次完成代码修改后，**自动执行 `git add`、`git commit`、`git push`**，无需用户单独要求
+- commit message 用中文简要描述本次改动内容
