@@ -6,7 +6,6 @@ import { useBranch, buildContext } from '@/lib/branch-context'
 import { useConversation } from '@/lib/conversation-context'
 import { Branch, Message } from '@/lib/types'
 import { MessageBubble } from './MessageBubble'
-import { ThemeToggle } from './ThemeToggle'
 import { cn } from '@/lib/utils'
 
 export function ChatArea() {
@@ -90,11 +89,14 @@ export function ChatArea() {
     abortControllerRef.current = abortController
     setStreamingBranchId(branchId)
 
+    const customInstructions = localStorage.getItem('mw-custom-instructions') || ''
+    const aiLang = localStorage.getItem('mw-ai-lang') || 'zh'
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages }),
+        body: JSON.stringify({ messages: allMessages, customInstructions, aiLang }),
         signal: abortController.signal,
       })
 
@@ -263,11 +265,10 @@ export function ChatArea() {
     <div className="flex flex-col flex-1 h-full bg-neutral-950 overflow-hidden">
 
       {/* Top bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-neutral-800 shrink-0">
+      <div className="flex items-center px-6 py-3 border-b border-neutral-800 shrink-0">
         <span className="text-sm font-medium text-neutral-400">
           {activeBranch?.title}
         </span>
-        <ThemeToggle />
       </div>
 
       {showHero ? (
@@ -312,9 +313,6 @@ export function ChatArea() {
                 <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
               </button>
             </div>
-            <p className="text-xs text-neutral-500 text-center mt-1.5 tracking-wide select-none">
-              内容由 AI 生成，请注意甄别
-            </p>
           </div>
         </div>
       ) : (

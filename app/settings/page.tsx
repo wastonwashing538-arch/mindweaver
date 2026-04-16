@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Sun, Moon, LogOut, Trash2 } from 'lucide-react'
+import { ArrowLeft, Sun, Moon, LogOut, Trash2, Check } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface UsageData {
@@ -114,6 +114,12 @@ export default function SettingsPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
+  // AI settings
+  const [aiLang, setAiLang] = useState<'zh' | 'en'>('zh')
+  const [customInstructions, setCustomInstructions] = useState('')
+  const [savedInstructions, setSavedInstructions] = useState(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Redirect if not logged in
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
@@ -121,9 +127,13 @@ export default function SettingsPage() {
     }
   }, [isLoggedIn, isLoading, router])
 
-  // Sync theme state with DOM
+  // Sync theme + AI settings from localStorage
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'))
+    try {
+      setAiLang((localStorage.getItem('mw-ai-lang') as 'zh' | 'en') || 'zh')
+      setCustomInstructions(localStorage.getItem('mw-custom-instructions') || '')
+    } catch {}
   }, [])
 
   function toggleTheme() {
@@ -131,6 +141,18 @@ export default function SettingsPage() {
     setIsDark(next)
     document.documentElement.classList.toggle('dark', next)
     try { localStorage.setItem('mw-theme', next ? 'dark' : 'light') } catch {}
+  }
+
+  function switchLang(lang: 'zh' | 'en') {
+    setAiLang(lang)
+    try { localStorage.setItem('mw-ai-lang', lang) } catch {}
+  }
+
+  function saveCustomInstructions() {
+    try { localStorage.setItem('mw-custom-instructions', customInstructions) } catch {}
+    setSavedInstructions(true)
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => setSavedInstructions(false), 2000)
   }
 
   async function handleSignOut() {
@@ -190,14 +212,77 @@ export default function SettingsPage() {
         {/* Token Usage */}
         <UsageSection />
 
-        {/* Account + Theme */}
-        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 divide-y divide-neutral-800 mb-4">
+        {/* Account */}
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 mb-4">
           <div className="px-4 py-3.5 flex items-center justify-between">
-            <span className="text-xs text-neutral-500">账号</span>
-            <span className="text-sm text-neutral-300 truncate max-w-[220px]">{user?.email}</span>
+            <span className="text-xs text-neutral-500">登录账号</span>
+            <span className="text-sm text-neutral-300 truncate max-w-[200px]">{user?.email}</span>
           </div>
+        </section>
+
+        {/* AI Settings */}
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 divide-y divide-neutral-800 mb-4">
+          {/* Language */}
           <div className="px-4 py-3.5 flex items-center justify-between">
-            <span className="text-xs text-neutral-500">主题</span>
+            <div>
+              <p className="text-xs text-neutral-500">AI 回复语言</p>
+            </div>
+            <div className="flex items-center gap-1 bg-neutral-800 rounded-lg p-0.5">
+              <button
+                onClick={() => switchLang('zh')}
+                className={`px-2.5 py-1 rounded-md text-xs transition-all duration-150 ${
+                  aiLang === 'zh'
+                    ? 'bg-neutral-700 text-neutral-100'
+                    : 'text-neutral-500 hover:text-neutral-300'
+                }`}
+              >
+                中文
+              </button>
+              <button
+                onClick={() => switchLang('en')}
+                className={`px-2.5 py-1 rounded-md text-xs transition-all duration-150 ${
+                  aiLang === 'en'
+                    ? 'bg-neutral-700 text-neutral-100'
+                    : 'text-neutral-500 hover:text-neutral-300'
+                }`}
+              >
+                English
+              </button>
+            </div>
+          </div>
+
+          {/* Custom Instructions */}
+          <div className="px-4 py-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-neutral-500">自定义指令</p>
+                <p className="text-[11px] text-neutral-700 mt-0.5">告诉 AI 关于你自己，或你希望它的回答风格</p>
+              </div>
+              <button
+                onClick={saveCustomInstructions}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all duration-200 ${
+                  savedInstructions
+                    ? 'text-emerald-400 bg-emerald-950/30'
+                    : 'text-neutral-500 hover:text-neutral-300 bg-neutral-800 hover:bg-neutral-700'
+                }`}
+              >
+                {savedInstructions ? <><Check size={11} />已保存</> : '保存'}
+              </button>
+            </div>
+            <textarea
+              value={customInstructions}
+              onChange={e => setCustomInstructions(e.target.value)}
+              placeholder="例：我是一名产品经理，偏好简洁有力的表达，不喜欢冗长列举…"
+              rows={3}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-xs text-neutral-300 placeholder:text-neutral-600 resize-none outline-none focus:border-neutral-600 transition-colors leading-relaxed"
+            />
+          </div>
+        </section>
+
+        {/* Appearance */}
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 mb-4">
+          <div className="px-4 py-3.5 flex items-center justify-between">
+            <span className="text-xs text-neutral-500">外观</span>
             <button
               onClick={toggleTheme}
               className="flex items-center gap-1.5 text-sm text-neutral-300 hover:text-neutral-100 transition-colors"

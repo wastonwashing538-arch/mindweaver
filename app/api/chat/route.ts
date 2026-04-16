@@ -10,7 +10,7 @@ interface UsageData {
 const FREE_TIER_LIMIT = 100_000
 
 export async function POST(req: Request) {
-  const { messages } = await req.json()
+  const { messages, customInstructions, aiLang } = await req.json()
 
   // --- Auth + Quota check ---
   let userId: string | null = null
@@ -61,6 +61,13 @@ export async function POST(req: Request) {
   }
 
   // --- System prompt ---
+  const langInstruction = aiLang === 'en'
+    ? '\n\nPlease respond in English.'
+    : ''
+  const customPart = customInstructions?.trim()
+    ? `\n\n## 用户补充说明\n${customInstructions.trim()}`
+    : ''
+
   const systemMessage = {
     role: 'system',
     content: `你是用户的私人思考伙伴，运行在一个树状对话工具里。
@@ -94,7 +101,7 @@ export async function POST(req: Request) {
 - [方向二，8字以内]
 - [方向三，8字以内]
 
-这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。`,
+这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。${langInstruction}${customPart}`,
   }
 
   const response = await fetch('https://api.deepseek.com/chat/completions', {

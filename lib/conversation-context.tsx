@@ -143,6 +143,20 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const createConversation = useCallback(() => {
+    // If there's already an empty unused conversation, just switch to it
+    const existingEmpty = convsRef.current.find(c => {
+      const rootBranch = c.projectState.branches[c.projectState.rootBranchId]
+      const branchCount = Object.keys(c.projectState.branches).length
+      return rootBranch && rootBranch.messages.length === 0 && branchCount === 1
+    })
+    if (existingEmpty) {
+      setState(prev => {
+        saveActiveConvId(existingEmpty.id)
+        return { ...prev, activeConvId: existingEmpty.id }
+      })
+      return
+    }
+
     const newConv = makeNewConversation()
     setState(prev => {
       const next = [newConv, ...prev.conversations]

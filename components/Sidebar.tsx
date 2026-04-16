@@ -224,6 +224,16 @@ function HistoryList({ conversations, activeConvId, onSwitch, onDelete, onBack }
   const [menuId, setMenuId] = useState<string | null>(null)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
 
+  // Compute a global index offset per group for staggered animation
+  const groupsWithOffset = (() => {
+    let offset = 0
+    return groups.map(g => {
+      const startOffset = offset
+      offset += g.items.length
+      return { ...g, startOffset }
+    })
+  })()
+
   useEffect(() => {
     if (!menuId) return
     function close(e: MouseEvent | KeyboardEvent) {
@@ -250,11 +260,11 @@ function HistoryList({ conversations, activeConvId, onSwitch, onDelete, onBack }
 
       {/* List */}
       <div className="flex-1 overflow-y-auto p-2 space-y-3">
-        {groups.map(({ label, items }) => (
+        {groupsWithOffset.map(({ label, items, startOffset }) => (
           <div key={label}>
             <p className="px-2 py-1 text-[10px] text-neutral-600 uppercase tracking-widest select-none">{label}</p>
             <div className="space-y-0.5">
-              {items.map(conv => {
+              {items.map((conv, i) => {
                 const isActive = conv.id === activeConvId
                 return (
                   <div
@@ -272,6 +282,8 @@ function HistoryList({ conversations, activeConvId, onSwitch, onDelete, onBack }
                       cursor: 'pointer',
                       padding: '6px 10px',
                       transition: 'background-color 120ms ease',
+                      animation: 'historyItemEnter 220ms ease-out both',
+                      animationDelay: `${(startOffset + i) * 30}ms`,
                     }}
                     className="hover:bg-neutral-800/60"
                   >
