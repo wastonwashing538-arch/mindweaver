@@ -8,6 +8,44 @@ import { Branch, Message } from '@/lib/types'
 import { MessageBubble } from './MessageBubble'
 import { cn } from '@/lib/utils'
 
+// ── Three independent text pools ──────────────────────────────────────────
+const HERO_TITLES = [
+  '思维是树状的，对话也该如此。',
+  '每个想法，都值得长出自己的枝丫。',
+  '好奇心不该被压成一条线。',
+  '思考的本质，是分叉。',
+  '一个问题的深处，藏着三个新问题。',
+  '语言是思维的外衣，结构是它的骨架。',
+  '把混沌的直觉，长成清晰的脉络。',
+  '不是结论，是一棵正在生长的树。',
+]
+
+const SUBTITLES = [
+  '分叉探索，向上整合，把混沌变成洞见。',
+  '在这里，思考不必只走一条路。',
+  '每次分叉，都是一次新的可能。',
+  '让复杂的问题，生长出自己的形状。',
+  '不同方向同时探索，不必非此即彼。',
+  '思维的树，在对话中悄然生长。',
+  '把直觉捋成脉络，把疑惑长成思路。',
+  '深入一个方向，随时可以开辟另一条路。',
+]
+
+const PLACEHOLDERS = [
+  '你最近在思考什么难题？',
+  '把一个困扰你的问题丢进来……',
+  '今天想把哪个想法想透？',
+  '有什么事情越想越乱？说来听听……',
+  '一个你反复想起的问题……',
+  '随便一个想法，开始探索……',
+  '什么事情让你想停下来细想？',
+  '有什么直觉，但还说不清楚？',
+]
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
 export function ChatArea() {
   const { state, dispatch } = useBranch()
   const { activeConvId, updateTitle } = useConversation()
@@ -20,6 +58,13 @@ export function ChatArea() {
   const heroInputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isComposingRef = useRef(false)
+  const typingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const [heroTitle, setHeroTitle] = useState('')
+  const [typedTitle, setTypedTitle] = useState('')
+  const [heroSubtitle, setHeroSubtitle] = useState('')
+  const [heroPlaceholder, setHeroPlaceholder] = useState('')
+  const [subtitleVisible, setSubtitleVisible] = useState(false)
 
   const activeBranch: Branch = state.branches[state.activeBranchId]
   const ownMessages = activeBranch?.messages ?? []
@@ -54,6 +99,40 @@ export function ChatArea() {
       inputRef.current?.focus()
     }, 0)
   }, [state.activeBranchId])
+
+  // Typewriter effect for hero — triggers on each branch switch when empty
+  useEffect(() => {
+    const branch = state.branches[state.activeBranchId]
+    const empty = !branch?.parentBranchId && (branch?.messages?.length ?? 0) === 0
+    if (!empty) return
+
+    const title = pick(HERO_TITLES)
+    setHeroTitle(title)
+    setHeroSubtitle(pick(SUBTITLES))
+    setHeroPlaceholder(pick(PLACEHOLDERS))
+    setTypedTitle('')
+    setSubtitleVisible(false)
+
+    if (typingIntervalRef.current) clearInterval(typingIntervalRef.current)
+
+    let i = 0
+    typingIntervalRef.current = setInterval(() => {
+      i++
+      setTypedTitle(title.slice(0, i))
+      if (i >= title.length) {
+        clearInterval(typingIntervalRef.current!)
+        typingIntervalRef.current = null
+        setTimeout(() => setSubtitleVisible(true), 200)
+      }
+    }, 55)
+
+    return () => {
+      if (typingIntervalRef.current) {
+        clearInterval(typingIntervalRef.current)
+        typingIntervalRef.current = null
+      }
+    }
+  }, [state.activeBranchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function generateTitle(branchId: string, firstUserMessage: string) {
     try {
@@ -273,15 +352,21 @@ export function ChatArea() {
 
       {showHero ? (
         <div className="flex-1 flex flex-col items-center justify-center px-6 pb-8 overflow-hidden gap-10">
-          <div className={cn('text-center space-y-2', animatingOut && 'hero-exit')}>
+          <div className={cn('text-center space-y-3', animatingOut && 'hero-exit')}>
             <h2
-              className="text-2xl text-neutral-200 tracking-tight"
+              className="text-2xl text-neutral-200 tracking-tight min-h-[2rem]"
               style={{ fontFamily: 'var(--font-serif), Georgia, serif', fontStyle: 'italic' }}
             >
-              思维是树状的，对话也该如此。
+              {typedTitle}
+              {typedTitle.length < heroTitle.length && heroTitle.length > 0 && (
+                <span className="inline-block w-px h-6 bg-neutral-400 ml-0.5 align-middle animate-pulse" />
+              )}
             </h2>
-            <p className="text-sm text-neutral-500 tracking-wide">
-              一个问题，一个困惑，或一个想法……
+            <p
+              className="text-sm text-neutral-500 tracking-wide transition-opacity duration-700"
+              style={{ opacity: subtitleVisible ? 1 : 0 }}
+            >
+              {heroSubtitle}
             </p>
           </div>
 
@@ -295,7 +380,7 @@ export function ChatArea() {
                 onInput={handleResize}
                 onCompositionStart={() => { isComposingRef.current = true }}
                 onCompositionEnd={() => { isComposingRef.current = false }}
-                placeholder="一个问题，一个困惑，或一个想法…"
+                placeholder={heroPlaceholder}
                 rows={1}
                 className="flex-1 bg-transparent text-neutral-100 placeholder:text-neutral-400 text-sm leading-relaxed resize-none outline-none min-h-[24px] max-h-40 overflow-y-auto py-0.5"
               />
