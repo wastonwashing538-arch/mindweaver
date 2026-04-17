@@ -9,28 +9,48 @@ import { MessageBubble } from './MessageBubble'
 import { cn } from '@/lib/utils'
 
 // ── Three independent text pools ──────────────────────────────────────────
-const HERO_TITLES = [
-  '思维是树状的，对话也该如此。',
-  '每个想法，都值得长出自己的枝丫。',
-  '好奇心不该被压成一条线。',
-  '思考的本质，是分叉。',
-  '一个问题的深处，藏着三个新问题。',
-  '语言是思维的外衣，结构是它的骨架。',
-  '把混沌的直觉，长成清晰的脉络。',
-  '不是结论，是一棵正在生长的树。',
-]
 
+// Hero: user-first, warm, time-aware greetings
+function pickHeroTitle(): string {
+  const h = new Date().getHours()
+  if (h >= 5 && h < 12) return pick([
+    '早上好，今天想从哪里开始？',
+    '早安，有什么想法冒出来了？',
+    '新的一天，有什么值得深想？',
+    '早上好，有什么在脑子里转？',
+  ])
+  if (h >= 12 && h < 18) return pick([
+    '下午好，有什么值得深想的？',
+    '午后，来聊点什么吧。',
+    '下午好，有什么困扰着你？',
+    '今天，想把什么想清楚？',
+  ])
+  if (h >= 18 && h < 23) return pick([
+    '晚上好，今天有什么收获？',
+    '傍晚了，有什么想法还没理清？',
+    '晚上好，今天遇到什么有意思的事？',
+    '夜里，来聊点什么吧。',
+  ])
+  return pick([
+    '夜深了，有什么还没想清楚？',
+    '深夜，把脑子里的事聊聊吧。',
+    '还没睡呀，有什么在心里转？',
+  ])
+}
+
+// Subtitles: product positioning
 const SUBTITLES = [
-  '分叉探索，向上整合，把混沌变成洞见。',
-  '在这里，思考不必只走一条路。',
-  '每次分叉，都是一次新的可能。',
-  '让复杂的问题，生长出自己的形状。',
-  '不同方向同时探索，不必非此即彼。',
-  '思维的树，在对话中悄然生长。',
-  '把直觉捋成脉络，把疑惑长成思路。',
-  '深入一个方向，随时可以开辟另一条路。',
+  '分支对话，让每个方向都走得更深。',
+  '思维是树状的，这里是它生长的地方。',
+  '一个想法，可以同时朝多个方向延伸。',
+  '不只是聊天，是把思路梳理成型。',
+  '对话即思考，结构即洞见。',
+  '每次分叉，都是一次更深的探索。',
+  '在这里，你的每个想法都有空间展开。',
+  '把混沌的直觉，长成清晰的脉络。',
 ]
 
+// Placeholders: action-oriented, conversational
 const PLACEHOLDERS = [
   '你最近在思考什么难题？',
   '把一个困扰你的问题丢进来……',
@@ -106,7 +126,7 @@ export function ChatArea() {
     const empty = !branch?.parentBranchId && (branch?.messages?.length ?? 0) === 0
     if (!empty) return
 
-    const title = pick(HERO_TITLES)
+    const title = pickHeroTitle()
     setHeroTitle(title)
     setHeroSubtitle(pick(SUBTITLES))
     setHeroPlaceholder(pick(PLACEHOLDERS))
@@ -351,19 +371,19 @@ export function ChatArea() {
       </div>
 
       {showHero ? (
-        <div className="flex-1 flex flex-col items-center justify-center px-6 pb-8 overflow-hidden gap-10">
-          <div className={cn('text-center space-y-3', animatingOut && 'hero-exit')}>
+        <div className="flex-1 flex flex-col items-center justify-center px-6 pb-8 overflow-hidden gap-14">
+          <div className={cn('text-center space-y-5', animatingOut && 'hero-exit')}>
             <h2
-              className="text-2xl text-neutral-200 tracking-tight min-h-[2rem]"
+              className="text-[1.85rem] leading-snug text-neutral-200 tracking-tight min-h-[2.5rem]"
               style={{ fontFamily: 'var(--font-serif), Georgia, serif', fontStyle: 'italic' }}
             >
               {typedTitle}
               {typedTitle.length < heroTitle.length && heroTitle.length > 0 && (
-                <span className="inline-block w-px h-6 bg-neutral-400 ml-0.5 align-middle animate-pulse" />
+                <span className="inline-block w-px h-7 bg-neutral-400 ml-0.5 align-middle animate-pulse" />
               )}
             </h2>
             <p
-              className="text-sm text-neutral-500 tracking-wide transition-opacity duration-700"
+              className="text-base text-neutral-500 tracking-wide transition-opacity duration-700"
               style={{ opacity: subtitleVisible ? 1 : 0 }}
             >
               {heroSubtitle}
@@ -382,7 +402,7 @@ export function ChatArea() {
                 onCompositionEnd={() => { isComposingRef.current = false }}
                 placeholder={heroPlaceholder}
                 rows={1}
-                className="flex-1 bg-transparent text-neutral-100 placeholder:text-neutral-400 text-sm leading-relaxed resize-none outline-none min-h-[24px] max-h-40 overflow-y-auto py-0.5"
+                className="flex-1 bg-transparent text-neutral-100 placeholder:text-neutral-500/60 text-sm leading-relaxed resize-none outline-none min-h-[24px] max-h-40 overflow-y-auto py-0.5"
               />
               <button
                 onClick={sendMessage}
