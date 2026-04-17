@@ -460,18 +460,21 @@ export function Sidebar() {
 
       {/* ── Header: MindWeaver logo + action buttons ── */}
       <div className="px-4 py-3 border-b border-neutral-800 shrink-0 flex items-center justify-between">
-        <span
-          className="text-neutral-300 select-none"
-          style={{
-            fontFamily: 'var(--font-brand), Georgia, serif',
-            fontStyle: 'italic',
-            fontWeight: 500,
-            fontSize: '1.05rem',
-            letterSpacing: '0.01em',
-          }}
-        >
-          MindWeaver
-        </span>
+        <div className="flex items-center gap-2 select-none">
+          <img src="/logo.png" alt="MindWeaver" className="w-6 h-6 rounded-md object-cover shrink-0" />
+          <span
+            className="text-neutral-300"
+            style={{
+              fontFamily: 'var(--font-brand), Georgia, serif',
+              fontStyle: 'italic',
+              fontWeight: 500,
+              fontSize: '1.05rem',
+              letterSpacing: '0.01em',
+            }}
+          >
+            MindWeaver
+          </span>
+        </div>
         <div className="flex items-center gap-1">
           <button
             onClick={createConversation}

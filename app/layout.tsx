@@ -28,6 +28,10 @@ export const metadata: Metadata = {
   description: '个人思考工具。每条对话都是一棵树，在不同分支中深入探索，向上整合洞见。由 DeepSeek AI 驱动。',
   keywords: ['AI思考工具', '分支对话', '思维导图', 'DeepSeek', '个人知识管理'],
   authors: [{ name: 'MindWeaver' }],
+  icons: {
+    icon: '/logo.png',
+    apple: '/logo.png',
+  },
   robots: { index: true, follow: true },
   openGraph: {
     type: 'website',

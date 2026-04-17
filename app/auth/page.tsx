@@ -98,6 +98,7 @@ function AuthForm() {
 
         {/* Brand */}
         <div className="text-center mb-8">
+          <img src="/logo.png" alt="MindWeaver" className="w-20 h-20 rounded-2xl object-cover mx-auto mb-4 shadow-lg" />
           <h1
             className="text-neutral-100 select-none mb-1"
             style={{
