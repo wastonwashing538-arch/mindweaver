@@ -1,11 +1,12 @@
 # MindWeaver 项目文档
 > Claude Code 每次会话自动读取此文件。
 
-## 当前开发状态（2026-04-14）
-- **阶段一至九已完成**（含 UI 打磨、持久化、多对话管理）
+## 当前开发状态（2026-04-17）
+- **阶段一至十已完成**（含 UI 打磨、持久化、多对话管理、DeepSeek 接入、Vercel 部署、品牌视觉）
 - 启动：`npm run dev`，访问 http://localhost:3000
-- **当前任务**：DeepSeek 接入 + Prompt Engineering 优化（刚完成）
-- **下一步**：用户登录（Supabase Auth）→ Vercel 部署 → 合规文件
+- **线上地址**：https://mindweaver-three.vercel.app（已连接 GitHub，push 自动部署）
+- **当前任务**：品牌视觉 + Hero Banner 优化（刚完成）
+- **下一步**：移动端适配 → 订阅付费
 
 ## 目标用户
 - **主要面向中国大陆用户**
@@ -119,7 +120,7 @@ interface Conversation {
 | AI 调用 | 直接 fetch DeepSeek API（deepseek-chat） |
 | 状态管理 | React Context + useReducer |
 | 持久化 | localStorage（`lib/storage.ts` 抽象层，预留 Supabase 迁移接口） |
-| 部署 | Vercel（待配置） |
+| 部署 | Vercel（已上线，GitHub 自动部署，`DEEPSEEK_API_KEY` 已配置） |
 
 ---
 
@@ -131,26 +132,30 @@ interface Conversation {
 - **阶段七**：UI 打磨——Markdown 渲染、侧边栏树、胶囊型输入框
 - **阶段八**：大重设计——叶节点胶囊视图、深度色阶、树图拖拽展开、父消息链展示、主题切换、IME 修复
 - **阶段九**：多对话管理——localStorage 持久化、新建/切换/删除对话、历史记录视图、消息复制
-- **当前**：切换 DeepSeek + Prompt 优化
+- **阶段十**：品牌视觉——MindWeaver logo（侧边栏、登录页、favicon）、Hero Banner 三组随机语料库（时段问候/产品定位/行动占位符）、打字机动画
 
 ---
 
 ## 后续计划
 
 ### 近期
-- [ ] **用户登录**：Supabase Auth（邮箱登录）
-- [ ] **云端持久化**：Supabase Postgres，替换 `lib/storage.ts` 函数体
-- [ ] **Vercel 部署**：配置 `DEEPSEEK_API_KEY` 环境变量，绑定自定义域名
+- [ ] **移动端适配**：侧边栏收起、响应式布局
+- [ ] **自定义域名**：绑定到 Vercel 项目
 
 ### 中期
-- [ ] **隐私政策 + 用户协议**：上线必须，AI 内容免责条款
-- [ ] **设置页面**：主题（已有）、账号管理
-- [ ] **移动端适配**：侧边栏收起、响应式布局
+- [ ] **设置页面**：账号管理完善
+- [ ] **云端持久化**：Supabase Postgres，替换 `lib/storage.ts` 函数体（用户登录已有 Supabase Auth）
 
 ### 远期
 - [ ] **订阅付费**：国内支付宝/微信，定价待定
 - [ ] **知识库 AI**：将对话内容沉淀为可检索的知识库
 - [ ] **多模型支持**：用户可选 DeepSeek / Qwen / Kimi 等
+
+### 已完成
+- [x] **用户登录**：Supabase Auth（邮箱登录）
+- [x] **Vercel 部署**：已上线，GitHub 自动部署
+- [x] **隐私政策 + 用户协议**：已有 `/privacy` 和 `/terms` 页面
+- [x] **品牌视觉**：Logo、favicon、Hero Banner 动效与语料库
 
 ---
 
