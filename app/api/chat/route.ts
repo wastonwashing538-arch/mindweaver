@@ -19,7 +19,8 @@ export async function POST(req: Request) {
   if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     try {
       supabaseClient = await createClient()
-      const { data: { user } } = await supabaseClient.auth.getUser()
+      const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
+      console.log('[chat] auth:', user ? `uid=${user.id}` : 'guest', authError ? `err=${authError.message}` : '')
 
       if (user) {
         userId = user.id
@@ -41,12 +42,16 @@ export async function POST(req: Request) {
             .single(),
         ])
 
+        console.log('[chat] quota check: usageErr=', usageResult.error?.message, 'quotaErr=', quotaResult.error?.message)
+
         const usedTokens = (usageResult.data ?? []).reduce(
           (sum: number, row: { total_tokens: number }) => sum + row.total_tokens,
           0
         )
         const limit = quotaResult.data?.monthly_token_limit ?? FREE_TIER_LIMIT
         const tier = quotaResult.data?.tier ?? 'free'
+
+        console.log('[chat] tokens:', usedTokens, '/', limit, 'tier:', tier)
 
         if (tier === 'free' && usedTokens >= limit) {
           return new Response(
@@ -55,8 +60,8 @@ export async function POST(req: Request) {
           )
         }
       }
-    } catch {
-      // Supabase 不可用时跳过配额检查，继续提供服务
+    } catch (e) {
+      console.error('[chat] supabase block threw:', e)
     }
   }
 
