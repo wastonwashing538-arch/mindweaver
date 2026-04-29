@@ -1,3 +1,6 @@
+export const preferredRegion = ['hkg1', 'sin1']
+export const maxDuration = 30
+
 export async function POST(req: Request) {
   const { userMessage } = await req.json()
 

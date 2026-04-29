@@ -225,16 +225,31 @@ export function ChatArea() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let accumulated = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        accumulated += decoder.decode(value, { stream: true })
+      let pending = ''
+      let rafId: number | null = null
+
+      const flush = () => {
+        accumulated = pending
         dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: accumulated })
+        rafId = null
       }
-      const tail = decoder.decode()
-      if (tail) {
-        accumulated += tail
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          pending += decoder.decode(value, { stream: true })
+          if (rafId === null) rafId = requestAnimationFrame(flush)
+        }
+        if (rafId !== null) cancelAnimationFrame(rafId)
+        const tail = decoder.decode()
+        if (tail) pending += tail
+        accumulated = pending
         dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: accumulated })
+      } catch (err) {
+        if (rafId !== null) cancelAnimationFrame(rafId)
+        if ((err as Error).name === 'AbortError') return
+        dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: `出错了：${String(err)}` })
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return

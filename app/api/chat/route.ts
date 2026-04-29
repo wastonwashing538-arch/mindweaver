@@ -1,13 +1,59 @@
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+export const preferredRegion = ['hkg1', 'sin1']
+export const maxDuration = 60
+
 interface UsageData {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
 }
 
+interface QuotaData {
+  usedTokens: number
+  limit: number
+  tier: string
+}
+
 const FREE_TIER_LIMIT = 100_000
+
+const quotaCache = new Map<string, { data: QuotaData; expiresAt: number }>()
+
+async function getCachedQuota(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+): Promise<QuotaData> {
+  const cached = quotaCache.get(userId)
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.data
+  }
+  const startOfMonth = new Date()
+  startOfMonth.setDate(1)
+  startOfMonth.setHours(0, 0, 0, 0)
+  const [usageResult, quotaResult] = await Promise.all([
+    supabase
+      .from('token_usage')
+      .select('total_tokens')
+      .eq('user_id', userId)
+      .gte('created_at', startOfMonth.toISOString()),
+    supabase
+      .from('user_quota')
+      .select('monthly_token_limit, tier')
+      .eq('user_id', userId)
+      .single(),
+  ])
+  const data: QuotaData = {
+    usedTokens: (usageResult.data ?? []).reduce(
+      (sum: number, row: { total_tokens: number }) => sum + row.total_tokens,
+      0
+    ),
+    limit: quotaResult.data?.monthly_token_limit ?? FREE_TIER_LIMIT,
+    tier: quotaResult.data?.tier ?? 'free',
+  }
+  quotaCache.set(userId, { data, expiresAt: Date.now() + 5 * 60 * 1000 })
+  return data
+}
 
 export async function POST(req: Request) {
   const { messages, customInstructions, aiLang } = await req.json()
@@ -24,38 +70,11 @@ export async function POST(req: Request) {
 
       if (user) {
         userId = user.id
-
-        const startOfMonth = new Date()
-        startOfMonth.setDate(1)
-        startOfMonth.setHours(0, 0, 0, 0)
-
-        const [usageResult, quotaResult] = await Promise.all([
-          supabaseClient
-            .from('token_usage')
-            .select('total_tokens')
-            .eq('user_id', user.id)
-            .gte('created_at', startOfMonth.toISOString()),
-          supabaseClient
-            .from('user_quota')
-            .select('monthly_token_limit, tier')
-            .eq('user_id', user.id)
-            .single(),
-        ])
-
-        console.log('[chat] quota check: usageErr=', usageResult.error?.message, 'quotaErr=', quotaResult.error?.message)
-
-        const usedTokens = (usageResult.data ?? []).reduce(
-          (sum: number, row: { total_tokens: number }) => sum + row.total_tokens,
-          0
-        )
-        const limit = quotaResult.data?.monthly_token_limit ?? FREE_TIER_LIMIT
-        const tier = quotaResult.data?.tier ?? 'free'
-
-        console.log('[chat] tokens:', usedTokens, '/', limit, 'tier:', tier)
-
-        if (tier === 'free' && usedTokens >= limit) {
+        const quota = await getCachedQuota(supabaseClient, user.id)
+        console.log('[chat] tokens:', quota.usedTokens, '/', quota.limit, 'tier:', quota.tier)
+        if (quota.tier === 'free' && quota.usedTokens >= quota.limit) {
           return new Response(
-            JSON.stringify({ error: 'TOKEN_LIMIT_EXCEEDED', usedTokens, limit }),
+            JSON.stringify({ error: 'TOKEN_LIMIT_EXCEEDED', usedTokens: quota.usedTokens, limit: quota.limit }),
             { status: 429, headers: { 'Content-Type': 'application/json' } }
           )
         }
@@ -151,6 +170,7 @@ export async function POST(req: Request) {
         total_tokens: usage.total_tokens,
         model: 'deepseek-chat',
       })
+      quotaCache.delete(userId)
     } catch {
       // Non-fatal
     }
