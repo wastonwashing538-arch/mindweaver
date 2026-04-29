@@ -215,7 +215,14 @@ export function ChatArea() {
           }
         }
         if (res.status === 502) {
-          dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: 'AI 服务暂时不可用，请稍后重试。' })
+          let errorMsg = 'AI 服务暂时不可用，请稍后重试。'
+          try {
+            const errData: { error?: string; deepseekStatus?: number } = await res.json()
+            if (errData.deepseekStatus === 401) errorMsg = 'API 密钥无效，请联系管理员。'
+            else if (errData.deepseekStatus === 429) errorMsg = 'AI 请求频率过高，请稍后重试。'
+            else if (errData.deepseekStatus) errorMsg = `AI 服务异常（错误码 ${errData.deepseekStatus}），请稍后重试。`
+          } catch {}
+          dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: errorMsg })
           return
         }
         throw new Error(`HTTP ${res.status}`)

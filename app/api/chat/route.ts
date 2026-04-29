@@ -146,7 +146,7 @@ export async function POST(req: Request) {
     const errorBody = await response.text().catch(() => '')
     console.error('[chat] DeepSeek error', response.status, errorBody)
     return new Response(
-      JSON.stringify({ error: 'AI_SERVICE_ERROR', status: response.status }),
+      JSON.stringify({ error: 'AI_SERVICE_ERROR', deepseekStatus: response.status }),
       { status: 502, headers: { 'Content-Type': 'application/json' } }
     )
   }
