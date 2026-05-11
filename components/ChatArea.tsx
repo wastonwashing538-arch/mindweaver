@@ -7,6 +7,7 @@ import { useConversation } from '@/lib/conversation-context'
 import { Branch, Message } from '@/lib/types'
 import { MessageBubble } from './MessageBubble'
 import { cn } from '@/lib/utils'
+import { posthog } from '@/lib/posthog'
 
 // ── Three independent text pools ──────────────────────────────────────────
 
@@ -206,6 +207,7 @@ export function ChatArea() {
           if (data.error === 'TOKEN_LIMIT_EXCEEDED') {
             const used = data.usedTokens?.toLocaleString() ?? '—'
             const limit = data.limit?.toLocaleString() ?? '100,000'
+            posthog.capture('quota_exceeded', { used_tokens: data.usedTokens, limit: data.limit })
             dispatch({
               type: 'UPDATE_LAST_MESSAGE',
               branchId,
@@ -359,6 +361,7 @@ export function ChatArea() {
       messages: [],
       children: [],
     }
+    posthog.capture('branch_forked', { depth: parent.depth + 1 })
     dispatch({
       type: 'FORK',
       parentBranchId: state.activeBranchId,

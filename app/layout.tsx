@@ -1,7 +1,10 @@
 import type { Metadata } from 'next'
 import { Geist, Cormorant_Garamond, Instrument_Serif } from 'next/font/google'
+import { Suspense } from 'react'
 import { AuthProvider } from '@/lib/auth-context'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { PostHogProvider, PostHogPageview } from '@/components/PostHogProvider'
+import { Analytics } from '@vercel/analytics/react'
 import './globals.css'
 
 const geist = Geist({ subsets: ['latin'] })
@@ -72,11 +75,17 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className={`${geist.className} ${instrumentSerif.variable} ${cormorant.variable} h-full bg-neutral-950 antialiased`} suppressHydrationWarning>
-        <ErrorBoundary>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
-        </ErrorBoundary>
+        <PostHogProvider>
+          <ErrorBoundary>
+            <AuthProvider>
+              {children}
+            </AuthProvider>
+          </ErrorBoundary>
+          <Suspense>
+            <PostHogPageview />
+          </Suspense>
+          <Analytics />
+        </PostHogProvider>
       </body>
     </html>
   )

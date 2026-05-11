@@ -53,7 +53,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     .update({
       ...(conv.title !== undefined && { title: conv.title }),
       ...(conv.projectState !== undefined && { project_state: conv.projectState }),
-      updated_at: Date.now(),
+      updated_at: new Date().toISOString(),
     })
     .eq('id', id)
     .eq('user_id', user.id)

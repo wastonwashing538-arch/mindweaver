@@ -10,6 +10,7 @@ import {
   ReactNode,
 } from 'react'
 import { Conversation, ProjectState } from './types'
+import { posthog } from './posthog'
 import {
   loadConversations,
   saveConversations,
@@ -160,6 +161,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       const next = [newConv, ...prev.conversations]
       saveConversations(next)
       saveActiveConvId(newConv.id)
+      posthog.capture('conversation_created')
       if (isLoggedInRef.current) {
         createConversationInCloud(newConv)
       }

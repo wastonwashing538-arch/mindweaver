@@ -33,6 +33,8 @@ export async function GET() {
   return NextResponse.json(conversations)
 }
 
+const FREE_TIER_CONV_LIMIT = 50
+
 // POST /api/conversations — create a new conversation
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -40,6 +42,19 @@ export async function POST(request: NextRequest) {
 
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Enforce conversation limit for free-tier users
+  const { count } = await supabase
+    .from('conversations')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+
+  if ((count ?? 0) >= FREE_TIER_CONV_LIMIT) {
+    return NextResponse.json(
+      { error: 'CONVERSATION_LIMIT_EXCEEDED', limit: FREE_TIER_CONV_LIMIT },
+      { status: 429 }
+    )
   }
 
   const conv: Conversation = await request.json()

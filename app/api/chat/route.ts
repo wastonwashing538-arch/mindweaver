@@ -4,6 +4,23 @@ import { createClient } from '@/lib/supabase/server'
 export const preferredRegion = ['hkg1', 'sin1']
 export const maxDuration = 60
 
+// Simple in-memory rate limiter for unauthenticated (guest) requests.
+// Per-instance, not global — acceptable for current scale.
+const guestRateLimit = new Map<string, { count: number; resetAt: number }>()
+const GUEST_MAX_RPM = 10 // requests per minute
+
+function checkGuestRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = guestRateLimit.get(ip)
+  if (!entry || now > entry.resetAt) {
+    guestRateLimit.set(ip, { count: 1, resetAt: now + 60_000 })
+    return true
+  }
+  if (entry.count >= GUEST_MAX_RPM) return false
+  entry.count++
+  return true
+}
+
 interface UsageData {
   prompt_tokens: number
   completion_tokens: number
@@ -75,6 +92,15 @@ export async function POST(req: Request) {
         if (quota.tier === 'free' && quota.usedTokens >= quota.limit) {
           return new Response(
             JSON.stringify({ error: 'TOKEN_LIMIT_EXCEEDED', usedTokens: quota.usedTokens, limit: quota.limit }),
+            { status: 429, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+      } else {
+        // Unauthenticated guest — enforce per-IP rate limit
+        const ip = (req.headers.get('x-forwarded-for') ?? 'unknown').split(',')[0].trim()
+        if (!checkGuestRateLimit(ip)) {
+          return new Response(
+            JSON.stringify({ error: 'RATE_LIMITED' }),
             { status: 429, headers: { 'Content-Type': 'application/json' } }
           )
         }

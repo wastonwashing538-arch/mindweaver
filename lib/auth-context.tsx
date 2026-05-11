@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { User, AuthError } from '@supabase/supabase-js'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
+import { posthog } from '@/lib/posthog'
 
 interface AuthContextValue {
   user: User | null
@@ -77,23 +78,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string): Promise<AuthError | null> {
     if (!supabase) return { name: 'AuthError', message: 'Auth not configured' } as AuthError
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (!error && data.user) {
+      posthog.identify(data.user.id, { email: data.user.email })
+      posthog.capture('user_login')
+    }
     return error
   }
 
   async function signUp(email: string, password: string): Promise<AuthError | null> {
     if (!supabase) return { name: 'AuthError', message: 'Auth not configured' } as AuthError
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     })
+    if (!error && data.user) {
+      posthog.identify(data.user.id, { email: data.user.email })
+      posthog.capture('user_signup')
+    }
     return error
   }
 
   async function signOut() {
+    posthog.capture('user_logout')
+    posthog.reset()
     if (supabase) await supabase.auth.signOut()
     // Clear migration flag so re-login can re-migrate if needed
     localStorage.removeItem('mw-migrated')
