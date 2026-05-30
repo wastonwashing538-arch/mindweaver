@@ -17,7 +17,19 @@ export async function GET() {
   startOfMonth.setDate(1)
   startOfMonth.setHours(0, 0, 0, 0)
 
-  // Parallel: token usage + quota (base) + quota count columns
+  // Count columns query wrapped in try/catch (columns may not exist until DDL is run)
+  const fetchCountData = async () => {
+    try {
+      return await supabase
+        .from('user_quota')
+        .select('chat_count_daily_used, chat_count_daily_limit, daily_reset_at, chat_count_monthly_used, chat_count_monthly_limit, monthly_reset_at, subscription_expires_at')
+        .eq('user_id', user.id)
+        .single()
+    } catch {
+      return { data: null, error: 'columns_missing' }
+    }
+  }
+
   const [usageResult, quotaResult, countResult] = await Promise.all([
     supabase
       .from('token_usage')
@@ -29,13 +41,7 @@ export async function GET() {
       .select('monthly_token_limit, tier')
       .eq('user_id', user.id)
       .single(),
-    supabase
-      .from('user_quota')
-      .select('chat_count_daily_used, chat_count_daily_limit, daily_reset_at, chat_count_monthly_used, chat_count_monthly_limit, monthly_reset_at, subscription_expires_at')
-      .eq('user_id', user.id)
-      .single()
-      .then(r => r)  // non-throwing wrapper
-      .catch(() => ({ data: null, error: 'columns_missing' })),
+    fetchCountData(),
   ])
 
   const rows = usageResult.data ?? []
