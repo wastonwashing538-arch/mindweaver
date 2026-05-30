@@ -25,10 +25,14 @@ export function UpgradeModal({ open, onClose }: UpgradeModalProps) {
       const data = await res.json()
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl
+      } else if (data.error === 'Unauthorized') {
+        setError('请先登录再升级。')
       } else if (data.error === 'Payment not configured') {
         setError('支付功能暂未开放，请稍后再试。')
       } else {
-        setError('跳转失败，请重试。')
+        // Show specific error detail for debugging
+        const detail = data.detail ? JSON.stringify(data.detail).slice(0, 100) : data.error
+        setError(`跳转失败：${detail}`)
       }
     } catch {
       setError('网络错误，请重试。')
