@@ -1,14 +1,23 @@
 'use client'
 
 import { useRef, useEffect, useState, KeyboardEvent } from 'react'
-import { ArrowUp, GitBranch, Menu } from 'lucide-react'
+import { ArrowUp, GitBranch, Menu, Lock } from 'lucide-react'
 import { useBranch, buildContext } from '@/lib/branch-context'
 import { useConversation } from '@/lib/conversation-context'
+import { useAuth } from '@/lib/auth-context'
 import { Branch, Message } from '@/lib/types'
 import { MessageBubble } from './MessageBubble'
 import { GuestLimitModal } from './GuestLimitModal'
+import { UpgradeModal } from './UpgradeModal'
 import { cn } from '@/lib/utils'
 import { posthog } from '@/lib/posthog'
+
+interface AiModel {
+  id: string
+  display_name: string
+  tier_required: 'free' | 'vip'
+  description: string | null
+}
 
 // ── Three independent text pools ──────────────────────────────────────────
 
@@ -68,6 +77,48 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+// ── Model Selector ────────────────────────────────────────────────────────────
+
+function ModelSelector({
+  models,
+  selectedId,
+  userTier,
+  onSelect,
+}: {
+  models: AiModel[]
+  selectedId: string
+  userTier: 'free' | 'vip' | 'guest'
+  onSelect: (id: string, requiresVip: boolean) => void
+}) {
+  if (models.length <= 1) return null
+  return (
+    <div className="flex gap-1.5 mb-2 overflow-x-auto pb-0.5 scrollbar-none">
+      {models.map(model => {
+        const isSelected = model.id === selectedId
+        const locked = model.tier_required === 'vip' && userTier !== 'vip'
+        return (
+          <button
+            key={model.id}
+            onClick={() => onSelect(model.id, locked)}
+            title={locked ? `${model.display_name}（升级 Pro 解锁）` : model.description ?? model.display_name}
+            className={cn(
+              'shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all duration-150',
+              isSelected
+                ? 'bg-neutral-700 text-neutral-100 border border-neutral-500'
+                : locked
+                  ? 'text-neutral-600 border border-neutral-800 hover:border-neutral-700'
+                  : 'text-neutral-500 border border-neutral-800 hover:text-neutral-300 hover:border-neutral-600',
+            )}
+          >
+            {locked && <Lock size={10} className="shrink-0" />}
+            {model.display_name}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 interface ChatAreaProps {
   onMenuClick: () => void
 }
@@ -75,6 +126,7 @@ interface ChatAreaProps {
 export function ChatArea({ onMenuClick }: ChatAreaProps) {
   const { state, dispatch } = useBranch()
   const { activeConvId, updateTitle } = useConversation()
+  const { isLoggedIn } = useAuth()
   const [input, setInput] = useState('')
   const [streamingBranchId, setStreamingBranchId] = useState<string | null>(null)
   const [animatingOut, setAnimatingOut] = useState(false)
@@ -87,6 +139,28 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   const typingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [guestLimitOpen, setGuestLimitOpen] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+
+  // Models
+  const [models, setModels] = useState<AiModel[]>([{ id: 'deepseek-r1', display_name: 'DeepSeek R1', tier_required: 'free', description: null }])
+  const [selectedModelId, setSelectedModelId] = useState('deepseek-r1')
+  const [userTier, setUserTier] = useState<'free' | 'vip' | 'guest'>('guest')
+
+  // Fetch available models once on mount
+  useEffect(() => {
+    fetch('/api/models').then(r => r.ok ? r.json() : null).then(data => {
+      if (Array.isArray(data) && data.length > 0) setModels(data)
+    }).catch(() => {})
+  }, [])
+
+  // Fetch user tier when logged in
+  useEffect(() => {
+    if (!isLoggedIn) { setUserTier('guest'); return }
+    fetch('/api/usage').then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.quota?.tier) setUserTier(data.quota.tier as 'free' | 'vip')
+      else setUserTier('free')
+    }).catch(() => setUserTier('free'))
+  }, [isLoggedIn])
 
   const [heroTitle, setHeroTitle] = useState('')
   const [typedTitle, setTypedTitle] = useState('')
@@ -190,43 +264,65 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, customInstructions, aiLang, firstUserMessage }),
+        body: JSON.stringify({ messages: allMessages, model: selectedModelId, customInstructions, aiLang, firstUserMessage }),
         signal: abortController.signal,
       })
 
       if (!res.ok) {
+        let data: Record<string, unknown> = {}
+        try { data = await res.json() } catch {}
+
+        // Remove placeholder assistant message before showing modal/inline error
+        const trimToIndex = activeBranch.messages.length + 1
+
         if (res.status === 429) {
-          let data: { error?: string; usedTokens?: number; limit?: number } = {}
-          try { data = await res.json() } catch {}
           if (data.error === 'GUEST_LIMIT_REACHED') {
-            // Remove the empty assistant placeholder and show the modal
-            dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: activeBranch.messages.length + 1 })
+            dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: trimToIndex })
             setGuestLimitOpen(true)
             return
           }
+          if (data.error === 'DAILY_LIMIT_EXCEEDED' || data.error === 'MONTHLY_LIMIT_EXCEEDED') {
+            dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: trimToIndex })
+            posthog.capture('quota_exceeded', { error: data.error, used: data.used, limit: data.limit })
+            setUpgradeOpen(true)
+            return
+          }
           if (data.error === 'TOKEN_LIMIT_EXCEEDED') {
-            const used = data.usedTokens?.toLocaleString() ?? '—'
-            const limit = data.limit?.toLocaleString() ?? '100,000'
+            const used = (data.usedTokens as number)?.toLocaleString() ?? '—'
+            const limit = (data.limit as number)?.toLocaleString() ?? '100,000'
             posthog.capture('quota_exceeded', { used_tokens: data.usedTokens, limit: data.limit })
             dispatch({
-              type: 'UPDATE_LAST_MESSAGE',
-              branchId,
+              type: 'UPDATE_LAST_MESSAGE', branchId,
               content: `> **本月免费额度已用尽**\n>\n> 已使用 ${used} / ${limit} tokens，下个自然月自动重置。\n>\n> [前往设置查看用量 →](/settings)`,
             })
             return
           }
+          dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: '请求过于频繁，请稍后重试。' })
+          return
         }
+
+        if (res.status === 403 && data.error === 'MODEL_NOT_ALLOWED') {
+          dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: trimToIndex })
+          setUpgradeOpen(true)
+          return
+        }
+
+        if (res.status === 451 && data.error === 'CONTENT_VIOLATION') {
+          dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: trimToIndex })
+          dispatch({ type: 'ADD_MESSAGE', branchId, message: { id: crypto.randomUUID(), role: 'assistant', content: '> ⚠️ 您的消息包含违规内容，已被拦截，本次不计入次数。' } })
+          return
+        }
+
         if (res.status === 502) {
           let errorMsg = 'AI 服务暂时不可用，请稍后重试。'
-          try {
-            const errData: { error?: string; deepseekStatus?: number } = await res.json()
-            if (errData.deepseekStatus === 401) errorMsg = 'API 密钥无效，请联系管理员。'
-            else if (errData.deepseekStatus === 429) errorMsg = 'AI 请求频率过高，请稍后重试。'
-            else if (errData.deepseekStatus) errorMsg = `AI 服务异常（错误码 ${errData.deepseekStatus}），请稍后重试。`
-          } catch {}
+          const aiStatus = data.aiStatus as number | undefined
+          if (aiStatus === 401) errorMsg = 'API 密钥无效，请联系管理员。'
+          else if (aiStatus === 429) errorMsg = 'AI 请求频率过高，请稍后重试。'
+          else if (aiStatus) errorMsg = `AI 服务异常（错误码 ${aiStatus}），请稍后重试。`
           dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: errorMsg })
           return
         }
+
         throw new Error(`HTTP ${res.status}`)
       }
       if (!res.body) throw new Error('No response body')
@@ -403,6 +499,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   return (
     <div className="flex flex-col flex-1 h-full bg-neutral-950 overflow-hidden">
       <GuestLimitModal open={guestLimitOpen} onClose={() => setGuestLimitOpen(false)} />
+      <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
 
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 md:px-6 py-3 border-b border-neutral-800 shrink-0">
@@ -520,6 +617,16 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
             style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 1.5rem)' }}
           >
             <div className="max-w-3xl mx-auto">
+              {/* Model selector */}
+              <ModelSelector
+                models={models}
+                selectedId={selectedModelId}
+                userTier={userTier}
+                onSelect={(id, requiresVip) => {
+                  if (requiresVip) { setUpgradeOpen(true); return }
+                  setSelectedModelId(id)
+                }}
+              />
               <div className="flex items-end gap-2 bg-neutral-800 rounded-3xl px-4 py-2.5 border border-neutral-700 focus-within:border-neutral-500 transition-colors duration-200">
                 <textarea
                   ref={inputRef}

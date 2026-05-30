@@ -6,8 +6,18 @@ export const preferredRegion = ['hkg1', 'sin1']
 export const maxDuration = 60
 
 // Sentinel appended at the end of the stream carrying the AI-generated branch title.
-// The client strips this before rendering and uses it to update the branch title.
 export const TITLE_MARKER = '\n\n__MW_TITLE__'
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface AiModel {
+  id: string
+  display_name: string
+  relay_model_id: string
+  tier_required: 'free' | 'vip'
+  is_active: boolean
+  sort_order: number
+}
 
 interface UsageData {
   prompt_tokens: number
@@ -15,30 +25,130 @@ interface UsageData {
   total_tokens: number
 }
 
-interface QuotaData {
-  usedTokens: number
-  limit: number
-  tier: string
+// ── Defaults / fallbacks ──────────────────────────────────────────────────────
+
+const DEFAULT_MODELS: AiModel[] = [
+  { id: 'deepseek-r1', display_name: 'DeepSeek R1', relay_model_id: 'deepseek-chat', tier_required: 'free', is_active: true, sort_order: 1 },
+]
+
+// ── Model cache (5 min TTL) ───────────────────────────────────────────────────
+
+let modelsCache: { data: AiModel[]; expiresAt: number } = {
+  data: DEFAULT_MODELS,
+  expiresAt: 0,
 }
 
-const FREE_TIER_LIMIT = 100_000
+async function getActiveModels(supabase: Awaited<ReturnType<typeof createClient>>): Promise<AiModel[]> {
+  if (Date.now() < modelsCache.expiresAt) return modelsCache.data
+  try {
+    const { data, error } = await supabase
+      .from('ai_models')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order')
+    if (!error && data?.length) {
+      modelsCache = { data, expiresAt: Date.now() + 5 * 60 * 1000 }
+      return data
+    }
+  } catch {}
+  return DEFAULT_MODELS
+}
 
-const quotaCache = new Map<string, { data: QuotaData; expiresAt: number }>()
+// ── Quota cache (token-based legacy, 5 min TTL) ───────────────────────────────
+
+const FREE_TIER_TOKEN_LIMIT = 100_000
+const quotaCache = new Map<string, { tier: string; usedTokens: number; tokenLimit: number; expiresAt: number }>()
+
+async function getCachedTokenQuota(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+): Promise<{ tier: string; usedTokens: number; tokenLimit: number }> {
+  const cached = quotaCache.get(userId)
+  if (cached && Date.now() < cached.expiresAt) {
+    return { tier: cached.tier, usedTokens: cached.usedTokens, tokenLimit: cached.tokenLimit }
+  }
+  const startOfMonth = new Date()
+  startOfMonth.setDate(1)
+  startOfMonth.setHours(0, 0, 0, 0)
+  const [usageResult, quotaResult] = await Promise.all([
+    supabase.from('token_usage').select('total_tokens').eq('user_id', userId).gte('created_at', startOfMonth.toISOString()),
+    supabase.from('user_quota').select('monthly_token_limit, tier').eq('user_id', userId).single(),
+  ])
+  const data = {
+    tier: quotaResult.data?.tier ?? 'free',
+    usedTokens: (usageResult.data ?? []).reduce((sum: number, row: { total_tokens: number }) => sum + row.total_tokens, 0),
+    tokenLimit: quotaResult.data?.monthly_token_limit ?? FREE_TIER_TOKEN_LIMIT,
+  }
+  quotaCache.set(userId, { ...data, expiresAt: Date.now() + 5 * 60 * 1000 })
+  return data
+}
+
+// ── Count-based quota (Task E columns, soft fallback if DDL not run yet) ──────
+
+interface ChatCount {
+  dailyUsed: number
+  dailyLimit: number
+  dailyResetAt: string | null
+  monthlyUsed: number
+  monthlyLimit: number
+  monthlyResetAt: string | null
+}
+
+async function getChatCount(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+): Promise<ChatCount | null> {
+  try {
+    const { data, error } = await supabase
+      .from('user_quota')
+      .select('chat_count_daily_used, chat_count_daily_limit, daily_reset_at, chat_count_monthly_used, chat_count_monthly_limit, monthly_reset_at')
+      .eq('user_id', userId)
+      .single()
+    if (error || !data) return null
+    return {
+      dailyUsed: data.chat_count_daily_used ?? 0,
+      dailyLimit: data.chat_count_daily_limit ?? 50,
+      dailyResetAt: data.daily_reset_at ?? null,
+      monthlyUsed: data.chat_count_monthly_used ?? 0,
+      monthlyLimit: data.chat_count_monthly_limit ?? 0,
+      monthlyResetAt: data.monthly_reset_at ?? null,
+    }
+  } catch {
+    return null // columns not yet added — fall through to legacy token quota
+  }
+}
+
+// ── Content moderation (Task F) ───────────────────────────────────────────────
+
+async function isContentAllowed(text: string): Promise<boolean> {
+  const key = process.env.OPENAI_API_KEY
+  if (!key) return true // no moderation key → skip check
+  try {
+    const res = await fetch('https://api.openai.com/v1/moderations', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: text }),
+    })
+    if (!res.ok) return true // moderation service unavailable → allow
+    const { results } = await res.json()
+    return !results?.[0]?.flagged
+  } catch {
+    return true // on error → allow (don't block users for infra issues)
+  }
+}
+
+// ── Branch title generation ───────────────────────────────────────────────────
 
 async function generateBranchTitle(userMessage: string): Promise<string> {
+  const baseUrl = process.env.AI_RELAY_BASE_URL ?? 'https://api.deepseek.com'
+  const apiKey = process.env.AI_RELAY_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? ''
   try {
-    const res = await fetch('https://api.deepseek.com/chat/completions', {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'deepseek-chat',
-        messages: [{
-          role: 'user',
-          content: `根据以下用户消息，生成一个2-5个字的简短中文标题，概括核心话题。只输出标题本身，不加任何标点、引号或解释。\n\n用户消息：${userMessage}`,
-        }],
+        messages: [{ role: 'user', content: `根据以下用户消息，生成一个2-5个字的简短中文标题，概括核心话题。只输出标题本身，不加任何标点、引号或解释。\n\n用户消息：${userMessage}` }],
         max_tokens: 20,
       }),
     })
@@ -50,102 +160,118 @@ async function generateBranchTitle(userMessage: string): Promise<string> {
   }
 }
 
-async function getCachedQuota(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string
-): Promise<QuotaData> {
-  const cached = quotaCache.get(userId)
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached.data
-  }
-  const startOfMonth = new Date()
-  startOfMonth.setDate(1)
-  startOfMonth.setHours(0, 0, 0, 0)
-  const [usageResult, quotaResult] = await Promise.all([
-    supabase
-      .from('token_usage')
-      .select('total_tokens')
-      .eq('user_id', userId)
-      .gte('created_at', startOfMonth.toISOString()),
-    supabase
-      .from('user_quota')
-      .select('monthly_token_limit, tier')
-      .eq('user_id', userId)
-      .single(),
-  ])
-  const data: QuotaData = {
-    usedTokens: (usageResult.data ?? []).reduce(
-      (sum: number, row: { total_tokens: number }) => sum + row.total_tokens,
-      0
-    ),
-    limit: quotaResult.data?.monthly_token_limit ?? FREE_TIER_LIMIT,
-    tier: quotaResult.data?.tier ?? 'free',
-  }
-  quotaCache.set(userId, { data, expiresAt: Date.now() + 5 * 60 * 1000 })
-  return data
-}
+// ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  const { messages, customInstructions, aiLang, firstUserMessage } = await req.json()
+  const { messages, model: requestedModelId, customInstructions, aiLang, firstUserMessage } = await req.json()
 
-  // Start title generation immediately (parallel with the main stream)
+  // Start title generation immediately (runs in parallel with auth + AI call)
   const titlePromise: Promise<string | null> = firstUserMessage
     ? generateBranchTitle(firstUserMessage as string)
     : Promise.resolve(null)
 
-  // --- Auth + Quota check ---
+  // ── Auth & identity ──────────────────────────────────────────────────────────
   let userId: string | null = null
+  let userTier = 'guest'
   let supabaseClient: Awaited<ReturnType<typeof createClient>> | null = null
+  const isSupabaseConfigured = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
 
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  if (isSupabaseConfigured) {
     try {
       supabaseClient = await createClient()
-      const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
-      console.log('[chat] auth:', user ? `uid=${user.id}` : 'guest', authError ? `err=${authError.message}` : '')
+      const { data: { user } } = await supabaseClient.auth.getUser()
 
       if (user) {
         userId = user.id
-        const quota = await getCachedQuota(supabaseClient, user.id)
-        console.log('[chat] tokens:', quota.usedTokens, '/', quota.limit, 'tier:', quota.tier)
-        if (quota.tier === 'free' && quota.usedTokens >= quota.limit) {
-          return new Response(
-            JSON.stringify({ error: 'TOKEN_LIMIT_EXCEEDED', usedTokens: quota.usedTokens, limit: quota.limit }),
-            { status: 429, headers: { 'Content-Type': 'application/json' } }
-          )
-        }
-        // Anti-burst for free users
-        if (quota.tier === 'free') {
-          const burst = await checkFreeUserRateLimit(user.id)
-          if (!burst.allowed) {
-            return new Response(
-              JSON.stringify({ error: 'RATE_LIMITED' }),
-              { status: 429, headers: { 'Content-Type': 'application/json' } }
+        const tokenQuota = await getCachedTokenQuota(supabaseClient, user.id)
+        userTier = tokenQuota.tier
+        console.log('[chat] uid=%s tier=%s tokens=%d/%d', userId, userTier, tokenQuota.usedTokens, tokenQuota.tokenLimit)
+
+        // ── Check count-based quota (Task E) ──
+        const countData = await getChatCount(supabaseClient, user.id)
+        if (countData) {
+          if (userTier !== 'vip') {
+            // FREE: daily count
+            const todayStart = new Date()
+            todayStart.setHours(0, 0, 0, 0)
+            const isNewDay = !countData.dailyResetAt || new Date(countData.dailyResetAt) < todayStart
+            const effectiveDailyUsed = isNewDay ? 0 : countData.dailyUsed
+            if (effectiveDailyUsed >= countData.dailyLimit) {
+              return Response.json(
+                { error: 'DAILY_LIMIT_EXCEEDED', used: effectiveDailyUsed, limit: countData.dailyLimit },
+                { status: 429 }
+              )
+            }
+          } else if (countData.monthlyLimit > 0) {
+            // VIP: monthly count
+            const startOfMonth = new Date()
+            startOfMonth.setDate(1)
+            startOfMonth.setHours(0, 0, 0, 0)
+            const isNewMonth = !countData.monthlyResetAt || new Date(countData.monthlyResetAt) < startOfMonth
+            const effectiveMonthlyUsed = isNewMonth ? 0 : countData.monthlyUsed
+            if (effectiveMonthlyUsed >= countData.monthlyLimit) {
+              return Response.json(
+                { error: 'MONTHLY_LIMIT_EXCEEDED', used: effectiveMonthlyUsed, limit: countData.monthlyLimit },
+                { status: 429 }
+              )
+            }
+          }
+        } else {
+          // Fallback: legacy token-based limit
+          if (userTier === 'free' && tokenQuota.usedTokens >= tokenQuota.tokenLimit) {
+            return Response.json(
+              { error: 'TOKEN_LIMIT_EXCEEDED', usedTokens: tokenQuota.usedTokens, limit: tokenQuota.tokenLimit },
+              { status: 429 }
             )
           }
         }
+
+        // Anti-burst for free users (Redis, if configured)
+        if (userTier === 'free') {
+          const burst = await checkFreeUserRateLimit(user.id)
+          if (!burst.allowed) {
+            return Response.json({ error: 'RATE_LIMITED' }, { status: 429 })
+          }
+        }
       } else {
-        // Unauthenticated guest — distributed Redis rate limit (daily + per-minute)
+        // Guest: distributed rate limit
         const ip = (req.headers.get('x-forwarded-for') ?? 'unknown').split(',')[0].trim()
         const limitResult = await checkGuestLimits(ip)
         if (!limitResult.allowed) {
-          return new Response(
-            JSON.stringify({ error: limitResult.error }),
-            { status: 429, headers: { 'Content-Type': 'application/json' } }
-          )
+          return Response.json({ error: limitResult.error }, { status: 429 })
         }
       }
     } catch (e) {
-      console.error('[chat] supabase block threw:', e)
+      console.error('[chat] auth block threw:', e)
     }
   }
 
-  // --- System prompt ---
-  const langInstruction = aiLang === 'en'
-    ? '\n\nPlease respond in English.'
-    : ''
-  const customPart = customInstructions?.trim()
-    ? `\n\n## 用户补充说明\n${customInstructions.trim()}`
-    : ''
+  // ── Model validation (Task D) ────────────────────────────────────────────────
+  const modelId = (requestedModelId as string | undefined) || 'deepseek-r1'
+  let selectedModel: AiModel = DEFAULT_MODELS[0]
+
+  if (supabaseClient) {
+    const models = await getActiveModels(supabaseClient)
+    const found = models.find(m => m.id === modelId)
+    if (found) selectedModel = found
+  }
+
+  if (selectedModel.tier_required === 'vip' && userTier !== 'vip') {
+    return Response.json({ error: 'MODEL_NOT_ALLOWED' }, { status: 403 })
+  }
+
+  // ── Content moderation (Task F) ──────────────────────────────────────────────
+  const lastUserMsg = (messages as { role: string; content: string }[]).filter(m => m.role === 'user').at(-1)?.content
+  if (lastUserMsg) {
+    const allowed = await isContentAllowed(lastUserMsg)
+    if (!allowed) {
+      return Response.json({ error: 'CONTENT_VIOLATION' }, { status: 451 })
+    }
+  }
+
+  // ── System prompt ────────────────────────────────────────────────────────────
+  const langInstruction = aiLang === 'en' ? '\n\nPlease respond in English.' : ''
+  const customPart = customInstructions?.trim() ? `\n\n## 用户补充说明\n${customInstructions.trim()}` : ''
 
   const systemMessage = {
     role: 'system',
@@ -183,14 +309,18 @@ export async function POST(req: Request) {
 这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。${langInstruction}${customPart}`,
   }
 
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
+  // ── AI call (relay or direct DeepSeek) ───────────────────────────────────────
+  const relayBaseUrl = process.env.AI_RELAY_BASE_URL ?? 'https://api.deepseek.com'
+  const relayApiKey = process.env.AI_RELAY_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? ''
+
+  const response = await fetch(`${relayBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+      Authorization: `Bearer ${relayApiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      model: selectedModel.relay_model_id,
       messages: [systemMessage, ...messages],
       stream: true,
       stream_options: { include_usage: true },
@@ -199,39 +329,46 @@ export async function POST(req: Request) {
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '')
-    console.error('[chat] DeepSeek error', response.status, errorBody)
-    return new Response(
-      JSON.stringify({ error: 'AI_SERVICE_ERROR', deepseekStatus: response.status }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } }
+    console.error('[chat] AI error', response.status, errorBody)
+    return Response.json(
+      { error: 'AI_SERVICE_ERROR', aiStatus: response.status },
+      { status: 502 }
     )
   }
 
-  // Promise that resolves to usage data when stream finishes
+  // ── Async post-stream tasks ───────────────────────────────────────────────────
   let resolveUsage!: (u: UsageData | null) => void
-  const usagePromise = new Promise<UsageData | null>(resolve => {
-    resolveUsage = resolve
-  })
+  const usagePromise = new Promise<UsageData | null>(resolve => { resolveUsage = resolve })
 
-  // Save token usage AFTER the response is fully streamed (Next.js 15+ after())
   after(async () => {
     if (!userId || !supabaseClient) return
     const usage = await usagePromise
-    if (!usage) return
+
+    // Increment chat count (Task E)
     try {
-      await supabaseClient.from('token_usage').insert({
-        user_id: userId,
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        total_tokens: usage.total_tokens,
-        model: 'deepseek-chat',
-      })
-      quotaCache.delete(userId)
+      await supabaseClient.rpc('increment_chat_count', { uid: userId, is_vip: userTier === 'vip' })
     } catch {
-      // Non-fatal
+      // DDL not yet applied — non-fatal
+    }
+
+    // Record token usage (legacy, also invalidates quota cache)
+    if (usage) {
+      try {
+        await supabaseClient.from('token_usage').insert({
+          user_id: userId,
+          prompt_tokens: usage.prompt_tokens,
+          completion_tokens: usage.completion_tokens,
+          total_tokens: usage.total_tokens,
+          model: selectedModel.relay_model_id,
+        })
+        quotaCache.delete(userId)
+      } catch {
+        // Non-fatal
+      }
     }
   })
 
-  // --- Stream SSE, forward content only ---
+  // ── Stream SSE, forward content only ─────────────────────────────────────────
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
@@ -255,24 +392,17 @@ export async function POST(req: Request) {
             if (data === '[DONE]') continue
             try {
               const json = JSON.parse(data)
-              // Capture usage from the final message (stream_options.include_usage)
-              if (json.usage) {
-                capturedUsage = json.usage
-              }
+              if (json.usage) capturedUsage = json.usage
               const content = json.choices?.[0]?.delta?.content
-              if (content) {
-                controller.enqueue(encoder.encode(content))
-              }
-            } catch {
-              // Ignore unparseable lines
-            }
+              if (content) controller.enqueue(encoder.encode(content))
+            } catch {}
           }
         }
-        // Append branch title (generated in parallel, should already be ready)
+
+        // Append branch title (parallel generation, should be ready by now)
         const title = await titlePromise
-        if (title) {
-          controller.enqueue(encoder.encode(TITLE_MARKER + JSON.stringify({ title })))
-        }
+        if (title) controller.enqueue(encoder.encode(TITLE_MARKER + JSON.stringify({ title })))
+
         controller.close()
         resolveUsage(capturedUsage)
       } catch (err) {
