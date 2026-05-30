@@ -1,21 +1,18 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { ArrowLeft, Sun, Moon, LogOut, Trash2, Check } from 'lucide-react'
+import { useState, useEffect, useRef, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { ArrowLeft, Sun, Moon, LogOut, Trash2, Check, Zap, FileText } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface UsageData {
-  currentMonth: {
-    total: number
-    prompt: number
-    completion: number
-    callCount: number
-  }
-  quota: {
-    limit: number
-    tier: string
-  }
+  currentMonth: { total: number; prompt: number; completion: number; callCount: number }
+  quota: { limit: number; tier: string }
+  chatQuota: {
+    dailyUsed: number; dailyLimit: number
+    monthlyUsed: number; monthlyLimit: number
+    subscriptionExpiresAt: string | null
+  } | null
 }
 
 function formatTokens(n: number): string {
@@ -23,9 +20,25 @@ function formatTokens(n: number): string {
   return n.toLocaleString()
 }
 
+// Handles upgrade redirect banner
+function UpgradedBanner() {
+  const params = useSearchParams()
+  const [show, setShow] = useState(false)
+  useEffect(() => { if (params.get('upgraded') === '1') setShow(true) }, [params])
+  if (!show) return null
+  return (
+    <div className="rounded-2xl border border-emerald-800/50 bg-emerald-950/20 px-4 py-3 mb-4 flex items-center gap-2.5">
+      <Check size={14} className="text-emerald-400 shrink-0" />
+      <p className="text-xs text-emerald-300">升级成功！Pro 权益已生效，享受更多次数和高级模型。</p>
+    </div>
+  )
+}
+
 function UsageSection() {
+  const router = useRouter()
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [upgrading, setUpgrading] = useState(false)
 
   useEffect(() => {
     fetch('/api/usage')
@@ -33,6 +46,16 @@ function UsageSection() {
       .then(data => { setUsage(data); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+
+  async function handleUpgrade() {
+    setUpgrading(true)
+    try {
+      const res = await fetch('/api/creem/checkout', { method: 'POST' })
+      const data = await res.json()
+      if (data.checkoutUrl) window.location.href = data.checkoutUrl
+      else setUpgrading(false)
+    } catch { setUpgrading(false) }
+  }
 
   if (loading) {
     return (
@@ -47,8 +70,70 @@ function UsageSection() {
 
   if (!usage) return null
 
+  const tier = usage.quota.tier
+  const isVip = tier === 'vip'
+  const { chatQuota } = usage
+
+  // Count-based display (primary when DDL is applied)
+  if (chatQuota) {
+    const usedCount = isVip ? chatQuota.monthlyUsed : chatQuota.dailyUsed
+    const limitCount = isVip ? chatQuota.monthlyLimit : chatQuota.dailyLimit
+    const effectiveLimit = limitCount > 0 ? limitCount : (isVip ? 3000 : 50)
+    const pct = Math.min((usedCount / effectiveLimit) * 100, 100)
+    const remaining = Math.max(effectiveLimit - usedCount, 0)
+    const isNear = pct >= 80
+
+    return (
+      <section className="rounded-2xl border border-neutral-800 bg-neutral-900 mb-4">
+        <div className="px-4 py-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-neutral-500">{isVip ? '本月对话次数' : '今日对话次数'}</span>
+            <span className="text-xs px-2 py-0.5 rounded-full"
+              style={{ backgroundColor: isVip ? 'rgba(161,100,30,0.2)' : 'rgba(82,82,82,0.3)', color: isVip ? '#d4a96a' : '#737373' }}>
+              {isVip ? 'Pro ✦' : '免费版'}
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="h-1.5 w-full rounded-full bg-neutral-800 overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${pct}%`, backgroundColor: isNear ? '#ef4444' : (isVip ? '#b45309' : '#78716c') }} />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span style={{ color: isNear ? '#f87171' : '#737373' }}>
+                已用 {usedCount} / {effectiveLimit} 次
+              </span>
+              <span className="text-neutral-600">剩余 {remaining} 次</span>
+            </div>
+          </div>
+
+          {isVip && chatQuota.subscriptionExpiresAt && (
+            <p className="text-[11px] text-neutral-600">
+              订阅到期：{new Date(chatQuota.subscriptionExpiresAt).toLocaleDateString('zh-CN')}
+            </p>
+          )}
+
+          {!isVip && isNear && (
+            <p className="text-xs text-amber-500/80 bg-amber-950/20 rounded-lg px-3 py-2">
+              今日次数即将用尽，明天 0 点重置。
+            </p>
+          )}
+
+          {!isVip && (
+            <button onClick={handleUpgrade} disabled={upgrading}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors disabled:opacity-60">
+              <Zap size={12} />
+              {upgrading ? '跳转中…' : '升级 Pro · 每月 3000 次 + 全部模型'}
+            </button>
+          )}
+        </div>
+      </section>
+    )
+  }
+
+  // Legacy: token-based display (before DDL is applied)
   const { total, callCount } = usage.currentMonth
-  const { limit, tier } = usage.quota
+  const { limit } = usage.quota
   const pct = Math.min((total / limit) * 100, 100)
   const remaining = Math.max(limit - total, 0)
   const isNearLimit = pct >= 80
@@ -58,44 +143,26 @@ function UsageSection() {
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs text-neutral-500">本月用量</span>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{
-              backgroundColor: tier === 'pro' ? 'rgba(161,100,30,0.2)' : 'rgba(82,82,82,0.3)',
-              color: tier === 'pro' ? '#d4a96a' : '#737373',
-            }}
-          >
-            {tier === 'pro' ? 'Pro' : '免费版'}
+          <span className="text-xs px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: isVip ? 'rgba(161,100,30,0.2)' : 'rgba(82,82,82,0.3)', color: isVip ? '#d4a96a' : '#737373' }}>
+            {isVip ? 'Pro ✦' : '免费版'}
           </span>
         </div>
-
-        {/* Progress bar */}
         <div className="space-y-1.5">
           <div className="h-1.5 w-full rounded-full bg-neutral-800 overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{
-                width: `${pct}%`,
-                backgroundColor: isNearLimit ? '#ef4444' : '#78716c',
-              }}
-            />
+            <div className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${pct}%`, backgroundColor: isNearLimit ? '#ef4444' : '#78716c' }} />
           </div>
           <div className="flex items-center justify-between text-xs">
-            <span style={{ color: isNearLimit ? '#f87171' : '#737373' }}>
-              已用 {formatTokens(total)} token
-            </span>
-            <span className="text-neutral-600">
-              剩余 {formatTokens(remaining)}
-            </span>
+            <span style={{ color: isNearLimit ? '#f87171' : '#737373' }}>已用 {formatTokens(total)} token</span>
+            <span className="text-neutral-600">剩余 {formatTokens(remaining)}</span>
           </div>
         </div>
-
         <div className="flex items-center justify-between text-xs text-neutral-600 pt-0.5 border-t border-neutral-800">
           <span>本月对话 {callCount} 次</span>
           <span>上限 {formatTokens(limit)}</span>
         </div>
-
-        {isNearLimit && tier === 'free' && (
+        {isNearLimit && !isVip && (
           <p className="text-xs text-amber-500/80 bg-amber-950/20 rounded-lg px-3 py-2">
             免费额度即将用尽，下月自动重置。
           </p>
@@ -209,7 +276,12 @@ export default function SettingsPage() {
           MindWeaver
         </h1>
 
-        {/* Token Usage */}
+        {/* Upgrade success banner (shown after returning from Creem) */}
+        <Suspense fallback={null}>
+          <UpgradedBanner />
+        </Suspense>
+
+        {/* Usage */}
         <UsageSection />
 
         {/* Account */}
@@ -354,6 +426,9 @@ export default function SettingsPage() {
 
         {/* Footer links */}
         <div className="mt-8 flex gap-4 justify-center text-xs text-neutral-700">
+          <a href="/docs" className="hover:text-neutral-500 transition-colors flex items-center gap-1">
+            <FileText size={10} />使用指南
+          </a>
           <a href="/privacy" className="hover:text-neutral-500 transition-colors">隐私政策</a>
           <a href="/terms" className="hover:text-neutral-500 transition-colors">用户协议</a>
         </div>
