@@ -159,28 +159,15 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
     }
   }, [state.activeBranchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function generateTitle(branchId: string, firstUserMessage: string) {
-    try {
-      const res = await fetch('/api/generate-title', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userMessage: firstUserMessage }),
-      })
-      const { title } = await res.json()
-      if (title) {
-        dispatch({ type: 'SET_BRANCH_TITLE', branchId, title })
-        updateTitle(activeConvId, title)
-      }
-    } catch {
-      // non-critical
-    }
-  }
+  // Sentinel injected at the end of the chat stream carrying the branch title
+  const TITLE_MARKER = '\n\n__MW_TITLE__'
 
   // ── Core streaming function ──────────────────────────────────────────────
 
   async function streamResponse(
     branchId: string,
-    allMessages: { role: string; content: string }[]
+    allMessages: { role: string; content: string }[],
+    firstUserMessage?: string
   ) {
     dispatch({
       type: 'ADD_MESSAGE',
@@ -200,7 +187,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, customInstructions, aiLang }),
+        body: JSON.stringify({ messages: allMessages, customInstructions, aiLang, firstUserMessage }),
         signal: abortController.signal,
       })
 
@@ -243,7 +230,9 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
 
       const flush = () => {
         accumulated = pending
-        dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: accumulated })
+        // Strip title marker from live display if it arrives mid-flush
+        const markerIdx = accumulated.indexOf(TITLE_MARKER)
+        dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: markerIdx !== -1 ? accumulated.slice(0, markerIdx) : accumulated })
         rafId = null
       }
 
@@ -258,7 +247,21 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
         const tail = decoder.decode()
         if (tail) pending += tail
         accumulated = pending
+
+        // Extract and remove the title marker from the final content
+        const markerIdx = accumulated.indexOf(TITLE_MARKER)
+        let branchTitle: string | null = null
+        if (markerIdx !== -1) {
+          const titleJson = accumulated.slice(markerIdx + TITLE_MARKER.length)
+          accumulated = accumulated.slice(0, markerIdx)
+          try { branchTitle = JSON.parse(titleJson)?.title ?? null } catch {}
+        }
+
         dispatch({ type: 'UPDATE_LAST_MESSAGE', branchId, content: accumulated })
+        if (branchTitle) {
+          dispatch({ type: 'SET_BRANCH_TITLE', branchId, title: branchTitle })
+          updateTitle(activeConvId, branchTitle)
+        }
       } catch (err) {
         if (rafId !== null) cancelAnimationFrame(rafId)
         if ((err as Error).name === 'AbortError') return
@@ -297,14 +300,13 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
     const isFirstMessage = activeBranch.messages.length === 0
     const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: rawContent }
     dispatch({ type: 'ADD_MESSAGE', branchId, message: userMessage })
-    if (isFirstMessage) generateTitle(branchId, rawContent)
 
     const contextMessages = buildContext(branchId, state.branches)
     const allMessages = [
       ...contextMessages.map((m) => ({ role: m.role, content: m.content })),
       { role: 'user', content: rawContent },
     ]
-    await streamResponse(branchId, allMessages)
+    await streamResponse(branchId, allMessages, isFirstMessage ? rawContent : undefined)
   }
 
   // ── Retry last AI response ───────────────────────────────────────────────
