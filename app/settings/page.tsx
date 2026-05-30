@@ -40,6 +40,7 @@ function UsageSection() {
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
   const [upgrading, setUpgrading] = useState(false)
+  const [upgradeError, setUpgradeError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/usage')
@@ -53,12 +54,21 @@ function UsageSection() {
 
   async function handleUpgrade() {
     setUpgrading(true)
+    setUpgradeError(null)
     try {
       const res = await fetch('/api/creem/checkout', { method: 'POST' })
       const data = await res.json()
-      if (data.checkoutUrl) window.location.href = data.checkoutUrl
-      else setUpgrading(false)
-    } catch { setUpgrading(false) }
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl
+      } else {
+        const detail = data.detail ? JSON.stringify(data.detail).slice(0, 120) : data.error
+        setUpgradeError(`跳转失败：${detail}`)
+        setUpgrading(false)
+      }
+    } catch (e) {
+      setUpgradeError(`网络错误：${String(e)}`)
+      setUpgrading(false)
+    }
   }
 
   if (loading) {
@@ -138,11 +148,16 @@ function UsageSection() {
           )}
 
           {!isVip && (
-            <button onClick={handleUpgrade} disabled={upgrading}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors disabled:opacity-60">
-              <Zap size={12} />
-              {upgrading ? '跳转中…' : '升级 Pro · 每月 3000 次 + 全部模型'}
-            </button>
+            <>
+              {upgradeError && (
+                <p className="text-xs text-red-400 bg-red-950/20 rounded-lg px-3 py-2 break-all">{upgradeError}</p>
+              )}
+              <button onClick={handleUpgrade} disabled={upgrading}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors disabled:opacity-60">
+                <Zap size={12} />
+                {upgrading ? '跳转中…' : '升级 Pro · 每月 3000 次 + 全部模型'}
+              </button>
+            </>
           )}
         </div>
       </section>
