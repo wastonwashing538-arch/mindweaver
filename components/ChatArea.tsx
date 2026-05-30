@@ -563,6 +563,18 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
                 <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
               </button>
             </div>
+            {/* Model selector — also visible in hero/empty state */}
+            <div className="mt-2">
+              <ModelSelector
+                models={models}
+                selectedId={selectedModelId}
+                userTier={userTier}
+                onSelect={(id, requiresVip) => {
+                  if (requiresVip) { setUpgradeOpen(true); return }
+                  setSelectedModelId(id)
+                }}
+              />
+            </div>
           </div>
         </div>
       ) : (

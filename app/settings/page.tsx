@@ -38,13 +38,17 @@ function UsageSection() {
   const router = useRouter()
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
   const [upgrading, setUpgrading] = useState(false)
 
   useEffect(() => {
     fetch('/api/usage')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { setUsage(data); setLoading(false) })
-      .catch(() => setLoading(false))
+      .then(r => {
+        if (!r.ok) { setFetchError(true); setLoading(false); return null }
+        return r.json()
+      })
+      .then(data => { if (data) setUsage(data); setLoading(false) })
+      .catch(() => { setFetchError(true); setLoading(false) })
   }, [])
 
   async function handleUpgrade() {
@@ -68,7 +72,21 @@ function UsageSection() {
     )
   }
 
-  if (!usage) return null
+  if (fetchError || !usage) {
+    return (
+      <section className="rounded-2xl border border-neutral-800 bg-neutral-900 mb-4">
+        <div className="px-4 py-4 flex items-center justify-between">
+          <span className="text-xs text-neutral-600">用量数据加载失败</span>
+          <button
+            onClick={() => { setFetchError(false); setLoading(true); fetch('/api/usage').then(r => r.ok ? r.json() : null).then(d => { setUsage(d); setLoading(false) }).catch(() => { setFetchError(true); setLoading(false) }) }}
+            className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+          >
+            重试
+          </button>
+        </div>
+      </section>
+    )
+  }
 
   const tier = usage.quota.tier
   const isVip = tier === 'vip'
