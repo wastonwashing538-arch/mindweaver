@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET() {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -17,10 +18,11 @@ export async function GET() {
   startOfMonth.setDate(1)
   startOfMonth.setHours(0, 0, 0, 0)
 
-  // Count columns query wrapped in try/catch (columns may not exist until DDL is run)
+  // Count columns query via admin client (bypasses RLS, handles missing columns gracefully)
   const fetchCountData = async () => {
     try {
-      return await supabase
+      const admin = createAdminClient()
+      return await admin
         .from('user_quota')
         .select('chat_count_daily_used, chat_count_daily_limit, daily_reset_at, chat_count_monthly_used, chat_count_monthly_limit, monthly_reset_at, subscription_expires_at')
         .eq('user_id', user.id)

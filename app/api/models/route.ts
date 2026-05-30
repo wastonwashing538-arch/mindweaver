@@ -1,8 +1,7 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export const preferredRegion = ['hkg1', 'sin1']
 
-// Public model list (no auth required, relay_model_id not exposed)
 interface PublicModel {
   id: string
   display_name: string
@@ -22,9 +21,9 @@ export async function GET() {
     return Response.json(cache.data)
   }
 
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     try {
-      const supabase = await createClient()
+      const supabase = createAdminClient()
       const { data, error } = await supabase
         .from('ai_models')
         .select('id, display_name, tier_required, description, sort_order')

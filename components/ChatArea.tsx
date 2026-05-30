@@ -90,7 +90,7 @@ function ModelSelector({
   userTier: 'free' | 'vip' | 'guest'
   onSelect: (id: string, requiresVip: boolean) => void
 }) {
-  if (models.length <= 1) return null
+  if (models.length === 0) return null
   return (
     <div className="flex gap-1.5 mb-2 overflow-x-auto pb-0.5 scrollbar-none">
       {models.map(model => {
