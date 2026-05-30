@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Cormorant_Garamond, Instrument_Serif } from 'next/font/google'
 import { Suspense } from 'react'
+import Script from 'next/script'
 import { AuthProvider } from '@/lib/auth-context'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { PostHogProvider, PostHogPageview } from '@/components/PostHogProvider'
@@ -92,6 +93,10 @@ export default function RootLayout({
             <PostHogPageview />
           </Suspense>
           <Analytics />
+          {/* Cloudflare Turnstile — only load when site key is configured */}
+          {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && (
+            <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="lazyOnload" />
+          )}
         </PostHogProvider>
       </body>
     </html>

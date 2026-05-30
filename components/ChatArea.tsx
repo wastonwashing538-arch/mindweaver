@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useEffect, useState, KeyboardEvent } from 'react'
-import { ArrowUp, GitBranch, Menu, Lock } from 'lucide-react'
+import { ArrowUp, GitBranch, Menu } from 'lucide-react'
 import { useBranch, buildContext } from '@/lib/branch-context'
 import { useConversation } from '@/lib/conversation-context'
 import { useAuth } from '@/lib/auth-context'
@@ -11,13 +11,6 @@ import { GuestLimitModal } from './GuestLimitModal'
 import { UpgradeModal } from './UpgradeModal'
 import { cn } from '@/lib/utils'
 import { posthog } from '@/lib/posthog'
-
-interface AiModel {
-  id: string
-  display_name: string
-  tier_required: 'free' | 'vip'
-  description: string | null
-}
 
 // ── Three independent text pools ──────────────────────────────────────────
 
@@ -77,44 +70,29 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
-// ── Model Selector ────────────────────────────────────────────────────────────
+// ── Tier-based model badge (read-only, no user selection) ────────────────────
 
-function ModelSelector({
-  models,
-  selectedId,
+function TierModelBadge({
   userTier,
-  onSelect,
+  onUpgradeClick,
 }: {
-  models: AiModel[]
-  selectedId: string
   userTier: 'free' | 'vip' | 'guest'
-  onSelect: (id: string, requiresVip: boolean) => void
+  onUpgradeClick: () => void
 }) {
-  if (models.length === 0) return null
+  const isVip = userTier === 'vip'
   return (
-    <div className="flex gap-1.5 mb-2 overflow-x-auto pb-0.5 scrollbar-none">
-      {models.map(model => {
-        const isSelected = model.id === selectedId
-        const locked = model.tier_required === 'vip' && userTier !== 'vip'
-        return (
-          <button
-            key={model.id}
-            onClick={() => onSelect(model.id, locked)}
-            title={locked ? `${model.display_name}（升级 Pro 解锁）` : model.description ?? model.display_name}
-            className={cn(
-              'shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all duration-150',
-              isSelected
-                ? 'bg-neutral-700 text-neutral-100 border border-neutral-500'
-                : locked
-                  ? 'text-neutral-600 border border-neutral-800 hover:border-neutral-700'
-                  : 'text-neutral-500 border border-neutral-800 hover:text-neutral-300 hover:border-neutral-600',
-            )}
-          >
-            {locked && <Lock size={10} className="shrink-0" />}
-            {model.display_name}
-          </button>
-        )
-      })}
+    <div className="flex items-center gap-2 mb-2">
+      <span className="text-[11px] px-2.5 py-1 rounded-full border border-neutral-800 text-neutral-600 select-none">
+        {isVip ? '✦ Claude 4.5 Sonnet' : 'DeepSeek R1'}
+      </span>
+      {!isVip && (
+        <button
+          onClick={onUpgradeClick}
+          className="text-[11px] text-amber-500/60 hover:text-amber-400 transition-colors"
+        >
+          升级 Pro 解锁 Claude →
+        </button>
+      )}
     </div>
   )
 }
@@ -140,18 +118,9 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
 
   const [guestLimitOpen, setGuestLimitOpen] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
-
-  // Models
-  const [models, setModels] = useState<AiModel[]>([{ id: 'deepseek-r1', display_name: 'DeepSeek R1', tier_required: 'free', description: null }])
-  const [selectedModelId, setSelectedModelId] = useState('deepseek-r1')
   const [userTier, setUserTier] = useState<'free' | 'vip' | 'guest'>('guest')
-
-  // Fetch available models once on mount
-  useEffect(() => {
-    fetch('/api/models').then(r => r.ok ? r.json() : null).then(data => {
-      if (Array.isArray(data) && data.length > 0) setModels(data)
-    }).catch(() => {})
-  }, [])
+  const turnstileTokenRef = useRef<string | null>(null)
+  const turnstileWidgetRef = useRef<string | null>(null)  // widget ID for reset
 
   // Fetch user tier when logged in
   useEffect(() => {
@@ -161,6 +130,32 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
       else setUserTier('free')
     }).catch(() => setUserTier('free'))
   }, [isLoggedIn])
+
+  // Turnstile invisible widget — only when site key is configured
+  useEffect(() => {
+    const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    if (!siteKey || typeof window === 'undefined') return
+    // Wait for the Turnstile script to load
+    const init = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ts = (window as any).turnstile
+      if (!ts) return
+      if (turnstileWidgetRef.current) return  // already rendered
+      const container = document.getElementById('mw-turnstile-container')
+      if (!container) return
+      turnstileWidgetRef.current = ts.render(container, {
+        sitekey: siteKey,
+        appearance: 'interaction-only',
+        callback: (token: string) => { turnstileTokenRef.current = token },
+        'expired-callback': () => { turnstileTokenRef.current = null },
+        'error-callback':   () => { turnstileTokenRef.current = null },
+      })
+    }
+    // Turnstile script may already be loaded or still loading
+    if ((window as any).turnstile) { init() } // eslint-disable-line @typescript-eslint/no-explicit-any
+    else { window.addEventListener('load', init) }
+    return () => window.removeEventListener('load', init)
+  }, [])
 
   const [heroTitle, setHeroTitle] = useState('')
   const [typedTitle, setTypedTitle] = useState('')
@@ -264,7 +259,13 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, model: selectedModelId, customInstructions, aiLang, firstUserMessage }),
+        body: JSON.stringify({
+          messages: allMessages,
+          customInstructions,
+          aiLang,
+          firstUserMessage,
+          turnstileToken: turnstileTokenRef.current ?? undefined,
+        }),
         signal: abortController.signal,
       })
 
@@ -498,6 +499,8 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
 
   return (
     <div className="flex flex-col flex-1 h-full bg-neutral-950 overflow-hidden">
+      {/* Turnstile invisible widget container */}
+      <div id="mw-turnstile-container" className="hidden" aria-hidden="true" />
       <GuestLimitModal open={guestLimitOpen} onClose={() => setGuestLimitOpen(false)} />
       <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
 
@@ -563,17 +566,9 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
                 <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
               </button>
             </div>
-            {/* Model selector — also visible in hero/empty state */}
+            {/* Model badge — also visible in hero/empty state */}
             <div className="mt-2">
-              <ModelSelector
-                models={models}
-                selectedId={selectedModelId}
-                userTier={userTier}
-                onSelect={(id, requiresVip) => {
-                  if (requiresVip) { setUpgradeOpen(true); return }
-                  setSelectedModelId(id)
-                }}
-              />
+              <TierModelBadge userTier={userTier} onUpgradeClick={() => setUpgradeOpen(true)} />
             </div>
           </div>
         </div>
@@ -629,16 +624,8 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
             style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 1.5rem)' }}
           >
             <div className="max-w-3xl mx-auto">
-              {/* Model selector */}
-              <ModelSelector
-                models={models}
-                selectedId={selectedModelId}
-                userTier={userTier}
-                onSelect={(id, requiresVip) => {
-                  if (requiresVip) { setUpgradeOpen(true); return }
-                  setSelectedModelId(id)
-                }}
-              />
+              {/* Model badge (tier-based, read-only) */}
+              <TierModelBadge userTier={userTier} onUpgradeClick={() => setUpgradeOpen(true)} />
               <div className="flex items-end gap-2 bg-neutral-800 rounded-3xl px-4 py-2.5 border border-neutral-700 focus-within:border-neutral-500 transition-colors duration-200">
                 <textarea
                   ref={inputRef}

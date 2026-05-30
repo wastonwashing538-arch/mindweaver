@@ -1,153 +1,112 @@
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { checkGuestLimits, checkFreeUserRateLimit } from '@/lib/rate-limit'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { checkGuestLimits } from '@/lib/rate-limit'
 
 export const preferredRegion = ['hkg1', 'sin1']
 export const maxDuration = 60
 
-// Sentinel appended at the end of the stream carrying the AI-generated branch title.
 export const TITLE_MARKER = '\n\n__MW_TITLE__'
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Dual-channel config (read from env, never hardcoded) ──────────────────────
 
-interface AiModel {
-  id: string
-  display_name: string
-  relay_model_id: string
-  tier_required: 'free' | 'vip'
-  is_active: boolean
-  sort_order: number
+const FREE_CHANNEL = {
+  baseUrl: process.env.DEEPSEEK_OFFICIAL_BASE_URL ?? 'https://api.deepseek.com',
+  apiKey:  process.env.DEEPSEEK_OFFICIAL_API_KEY  ?? process.env.DEEPSEEK_API_KEY ?? '',
+  model:   process.env.FREE_MODEL_ID              ?? 'deepseek-reasoner',
 }
 
-interface UsageData {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
+const VIP_CHANNEL = {
+  baseUrl: process.env.RELAY_CLAUDE_BASE_URL ?? '',
+  apiKey:  process.env.RELAY_CLAUDE_API_KEY  ?? '',
+  model:   process.env.VIP_MODEL_ID          ?? 'anthropic/claude-sonnet-4.5',
 }
 
-// ── Defaults / fallbacks ──────────────────────────────────────────────────────
+// ── Step 1: Cloudflare Turnstile ──────────────────────────────────────────────
 
-const DEFAULT_MODELS: AiModel[] = [
-  { id: 'deepseek-r1', display_name: 'DeepSeek R1', relay_model_id: 'deepseek-chat', tier_required: 'free', is_active: true, sort_order: 1 },
-]
-
-// ── Model cache (5 min TTL) ───────────────────────────────────────────────────
-
-let modelsCache: { data: AiModel[]; expiresAt: number } = {
-  data: DEFAULT_MODELS,
-  expiresAt: 0,
-}
-
-async function getActiveModels(supabase: Awaited<ReturnType<typeof createClient>>): Promise<AiModel[]> {
-  if (Date.now() < modelsCache.expiresAt) return modelsCache.data
+async function verifyTurnstile(token: string, ip: string): Promise<boolean> {
+  const secret = process.env.TURNSTILE_SECRET_KEY
+  if (!secret) return true  // not configured → skip (dev mode)
   try {
-    const { data, error } = await supabase
-      .from('ai_models')
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order')
-    if (!error && data?.length) {
-      modelsCache = { data, expiresAt: Date.now() + 5 * 60 * 1000 }
-      return data
-    }
-  } catch {}
-  return DEFAULT_MODELS
-}
-
-// ── Quota cache (token-based legacy, 5 min TTL) ───────────────────────────────
-
-const FREE_TIER_TOKEN_LIMIT = 100_000
-const quotaCache = new Map<string, { tier: string; usedTokens: number; tokenLimit: number; expiresAt: number }>()
-
-async function getCachedTokenQuota(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string
-): Promise<{ tier: string; usedTokens: number; tokenLimit: number }> {
-  const cached = quotaCache.get(userId)
-  if (cached && Date.now() < cached.expiresAt) {
-    return { tier: cached.tier, usedTokens: cached.usedTokens, tokenLimit: cached.tokenLimit }
-  }
-  const startOfMonth = new Date()
-  startOfMonth.setDate(1)
-  startOfMonth.setHours(0, 0, 0, 0)
-  const [usageResult, quotaResult] = await Promise.all([
-    supabase.from('token_usage').select('total_tokens').eq('user_id', userId).gte('created_at', startOfMonth.toISOString()),
-    supabase.from('user_quota').select('monthly_token_limit, tier').eq('user_id', userId).single(),
-  ])
-  const data = {
-    tier: quotaResult.data?.tier ?? 'free',
-    usedTokens: (usageResult.data ?? []).reduce((sum: number, row: { total_tokens: number }) => sum + row.total_tokens, 0),
-    tokenLimit: quotaResult.data?.monthly_token_limit ?? FREE_TIER_TOKEN_LIMIT,
-  }
-  quotaCache.set(userId, { ...data, expiresAt: Date.now() + 5 * 60 * 1000 })
-  return data
-}
-
-// ── Count-based quota (Task E columns, soft fallback if DDL not run yet) ──────
-
-interface ChatCount {
-  dailyUsed: number
-  dailyLimit: number
-  dailyResetAt: string | null
-  monthlyUsed: number
-  monthlyLimit: number
-  monthlyResetAt: string | null
-}
-
-async function getChatCount(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string
-): Promise<ChatCount | null> {
-  try {
-    const { data, error } = await supabase
-      .from('user_quota')
-      .select('chat_count_daily_used, chat_count_daily_limit, daily_reset_at, chat_count_monthly_used, chat_count_monthly_limit, monthly_reset_at')
-      .eq('user_id', userId)
-      .single()
-    if (error || !data) return null
-    return {
-      dailyUsed: data.chat_count_daily_used ?? 0,
-      dailyLimit: data.chat_count_daily_limit ?? 50,
-      dailyResetAt: data.daily_reset_at ?? null,
-      monthlyUsed: data.chat_count_monthly_used ?? 0,
-      monthlyLimit: data.chat_count_monthly_limit ?? 0,
-      monthlyResetAt: data.monthly_reset_at ?? null,
-    }
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ secret, response: token, remoteip: ip }),
+    })
+    const { success } = await res.json()
+    return success === true
   } catch {
-    return null // columns not yet added — fall through to legacy token quota
+    return true  // on infra error → allow
   }
 }
 
-// ── Content moderation (Task F) ───────────────────────────────────────────────
+// ── Step 2: OpenAI content moderation ────────────────────────────────────────
 
 async function isContentAllowed(text: string): Promise<boolean> {
   const key = process.env.OPENAI_API_KEY
-  if (!key) return true // no moderation key → skip check
+  if (!key) return true
   try {
     const res = await fetch('https://api.openai.com/v1/moderations', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'omni-moderation-latest', input: text }),
     })
-    if (!res.ok) return true // moderation service unavailable → allow
+    if (!res.ok) return true
     const { results } = await res.json()
     return !results?.[0]?.flagged
   } catch {
-    return true // on error → allow (don't block users for infra issues)
+    return true
   }
 }
 
-// ── Branch title generation ───────────────────────────────────────────────────
+// ── Step 3: User quota (admin client bypasses RLS) ────────────────────────────
+
+interface Quota {
+  tier: 'free' | 'vip'
+  dailyUsed: number
+  dailyLimit: number
+  monthlyUsed: number
+  monthlyLimit: number
+}
+
+async function getUserQuota(userId: string): Promise<Quota> {
+  const DEFAULT: Quota = { tier: 'free', dailyUsed: 0, dailyLimit: 50, monthlyUsed: 0, monthlyLimit: 0 }
+  try {
+    const admin = createAdminClient()
+    const { data, error } = await admin
+      .from('user_quota')
+      .select('tier, chat_count_daily_used, chat_count_daily_limit, daily_reset_at, chat_count_monthly_used, chat_count_monthly_limit, monthly_reset_at')
+      .eq('user_id', userId)
+      .single()
+    if (error || !data) return DEFAULT
+
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+    const isNewDay   = !data.daily_reset_at   || new Date(data.daily_reset_at)   < todayStart
+    const isNewMonth = !data.monthly_reset_at || new Date(data.monthly_reset_at) < monthStart
+
+    return {
+      tier:         (data.tier ?? 'free') as 'free' | 'vip',
+      dailyUsed:    isNewDay   ? 0 : (data.chat_count_daily_used   ?? 0),
+      dailyLimit:   data.chat_count_daily_limit   ?? 50,
+      monthlyUsed:  isNewMonth ? 0 : (data.chat_count_monthly_used ?? 0),
+      monthlyLimit: data.chat_count_monthly_limit ?? 0,
+    }
+  } catch {
+    return DEFAULT
+  }
+}
+
+// ── Title generation (always uses free channel — cheap, fast) ─────────────────
 
 async function generateBranchTitle(userMessage: string): Promise<string> {
-  const baseUrl = process.env.AI_RELAY_BASE_URL ?? 'https://api.deepseek.com'
-  const apiKey = process.env.AI_RELAY_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? ''
+  if (!FREE_CHANNEL.apiKey) return '新分支'
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+    const res = await fetch(`${FREE_CHANNEL.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${FREE_CHANNEL.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: FREE_CHANNEL.model,
         messages: [{ role: 'user', content: `根据以下用户消息，生成一个2-5个字的简短中文标题，概括核心话题。只输出标题本身，不加任何标点、引号或解释。\n\n用户消息：${userMessage}` }],
         max_tokens: 20,
       }),
@@ -160,122 +119,12 @@ async function generateBranchTitle(userMessage: string): Promise<string> {
   }
 }
 
-// ── POST handler ──────────────────────────────────────────────────────────────
+// ── System prompt ──────────────────────────────────────────────────────────────
 
-export async function POST(req: Request) {
-  const { messages, model: requestedModelId, customInstructions, aiLang, firstUserMessage } = await req.json()
-
-  // Start title generation immediately (runs in parallel with auth + AI call)
-  const titlePromise: Promise<string | null> = firstUserMessage
-    ? generateBranchTitle(firstUserMessage as string)
-    : Promise.resolve(null)
-
-  // ── Auth & identity ──────────────────────────────────────────────────────────
-  let userId: string | null = null
-  let userTier = 'guest'
-  let supabaseClient: Awaited<ReturnType<typeof createClient>> | null = null
-  const isSupabaseConfigured = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-
-  if (isSupabaseConfigured) {
-    try {
-      supabaseClient = await createClient()
-      const { data: { user } } = await supabaseClient.auth.getUser()
-
-      if (user) {
-        userId = user.id
-        const tokenQuota = await getCachedTokenQuota(supabaseClient, user.id)
-        userTier = tokenQuota.tier
-        console.log('[chat] uid=%s tier=%s tokens=%d/%d', userId, userTier, tokenQuota.usedTokens, tokenQuota.tokenLimit)
-
-        // ── Check count-based quota (Task E) ──
-        const countData = await getChatCount(supabaseClient, user.id)
-        if (countData) {
-          if (userTier !== 'vip') {
-            // FREE: daily count
-            const todayStart = new Date()
-            todayStart.setHours(0, 0, 0, 0)
-            const isNewDay = !countData.dailyResetAt || new Date(countData.dailyResetAt) < todayStart
-            const effectiveDailyUsed = isNewDay ? 0 : countData.dailyUsed
-            if (effectiveDailyUsed >= countData.dailyLimit) {
-              return Response.json(
-                { error: 'DAILY_LIMIT_EXCEEDED', used: effectiveDailyUsed, limit: countData.dailyLimit },
-                { status: 429 }
-              )
-            }
-          } else if (countData.monthlyLimit > 0) {
-            // VIP: monthly count
-            const startOfMonth = new Date()
-            startOfMonth.setDate(1)
-            startOfMonth.setHours(0, 0, 0, 0)
-            const isNewMonth = !countData.monthlyResetAt || new Date(countData.monthlyResetAt) < startOfMonth
-            const effectiveMonthlyUsed = isNewMonth ? 0 : countData.monthlyUsed
-            if (effectiveMonthlyUsed >= countData.monthlyLimit) {
-              return Response.json(
-                { error: 'MONTHLY_LIMIT_EXCEEDED', used: effectiveMonthlyUsed, limit: countData.monthlyLimit },
-                { status: 429 }
-              )
-            }
-          }
-        } else {
-          // Fallback: legacy token-based limit
-          if (userTier === 'free' && tokenQuota.usedTokens >= tokenQuota.tokenLimit) {
-            return Response.json(
-              { error: 'TOKEN_LIMIT_EXCEEDED', usedTokens: tokenQuota.usedTokens, limit: tokenQuota.tokenLimit },
-              { status: 429 }
-            )
-          }
-        }
-
-        // Anti-burst for free users (Redis, if configured)
-        if (userTier === 'free') {
-          const burst = await checkFreeUserRateLimit(user.id)
-          if (!burst.allowed) {
-            return Response.json({ error: 'RATE_LIMITED' }, { status: 429 })
-          }
-        }
-      } else {
-        // Guest: distributed rate limit
-        const ip = (req.headers.get('x-forwarded-for') ?? 'unknown').split(',')[0].trim()
-        const limitResult = await checkGuestLimits(ip)
-        if (!limitResult.allowed) {
-          return Response.json({ error: limitResult.error }, { status: 429 })
-        }
-      }
-    } catch (e) {
-      console.error('[chat] auth block threw:', e)
-    }
-  }
-
-  // ── Model validation (Task D) ────────────────────────────────────────────────
-  const modelId = (requestedModelId as string | undefined) || 'deepseek-r1'
-  let selectedModel: AiModel = DEFAULT_MODELS[0]
-
-  if (supabaseClient) {
-    const models = await getActiveModels(supabaseClient)
-    const found = models.find(m => m.id === modelId)
-    if (found) selectedModel = found
-  }
-
-  if (selectedModel.tier_required === 'vip' && userTier !== 'vip') {
-    return Response.json({ error: 'MODEL_NOT_ALLOWED' }, { status: 403 })
-  }
-
-  // ── Content moderation (Task F) ──────────────────────────────────────────────
-  const lastUserMsg = (messages as { role: string; content: string }[]).filter(m => m.role === 'user').at(-1)?.content
-  if (lastUserMsg) {
-    const allowed = await isContentAllowed(lastUserMsg)
-    if (!allowed) {
-      return Response.json({ error: 'CONTENT_VIOLATION' }, { status: 451 })
-    }
-  }
-
-  // ── System prompt ────────────────────────────────────────────────────────────
-  const langInstruction = aiLang === 'en' ? '\n\nPlease respond in English.' : ''
+function buildSystemPrompt(customInstructions: string, aiLang: string): string {
+  const langNote = aiLang === 'en' ? '\n\nPlease respond in English.' : ''
   const customPart = customInstructions?.trim() ? `\n\n## 用户补充说明\n${customInstructions.trim()}` : ''
-
-  const systemMessage = {
-    role: 'system',
-    content: `你是用户的私人思考伙伴，运行在一个树状对话工具里。
+  return `你是用户的私人思考伙伴，运行在一个树状对话工具里。
 
 工具特点：每条对话可以分叉成多个方向，用户在不同分支里分别深入探索。
 你的职责是帮助用户把一个方向想深、想透，并在适当时候点出值得拆开探索的岔路。
@@ -306,65 +155,131 @@ export async function POST(req: Request) {
 - [方向二，8字以内]
 - [方向三，8字以内]
 
-这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。${langInstruction}${customPart}`,
+这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。${langNote}${customPart}`
+}
+
+// ── POST handler ──────────────────────────────────────────────────────────────
+
+export async function POST(req: Request) {
+  const { messages, customInstructions, aiLang, firstUserMessage, turnstileToken } = await req.json()
+  const ip = (req.headers.get('x-forwarded-for') ?? '0.0.0.0').split(',')[0].trim()
+
+  // Start title generation in parallel — it's non-blocking and uses free channel
+  const titlePromise = firstUserMessage
+    ? generateBranchTitle(firstUserMessage as string)
+    : Promise.resolve(null)
+
+  // ── STEP 1: Turnstile ────────────────────────────────────────────────────────
+  const turnstileSecret = process.env.TURNSTILE_SECRET_KEY
+  if (turnstileSecret) {
+    // In production (secret is set), a valid token is required
+    if (!turnstileToken) {
+      return Response.json({ error: 'TURNSTILE_REQUIRED' }, { status: 403 })
+    }
+    const valid = await verifyTurnstile(turnstileToken as string, ip)
+    if (!valid) {
+      return Response.json({ error: 'TURNSTILE_FAILED' }, { status: 403 })
+    }
   }
 
-  // ── AI call (relay or direct DeepSeek) ───────────────────────────────────────
-  const relayBaseUrl = process.env.AI_RELAY_BASE_URL ?? 'https://api.deepseek.com'
-  const relayApiKey = process.env.AI_RELAY_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? ''
+  // ── STEP 2: Content moderation ───────────────────────────────────────────────
+  const lastUserMsg = (messages as { role: string; content: string }[])
+    .filter(m => m.role === 'user').at(-1)?.content
+  if (lastUserMsg) {
+    const allowed = await isContentAllowed(lastUserMsg)
+    if (!allowed) {
+      return Response.json({ error: 'CONTENT_VIOLATION' }, { status: 451 })
+    }
+  }
 
-  const response = await fetch(`${relayBaseUrl}/chat/completions`, {
+  // ── STEP 3: Auth → quota check → channel selection ───────────────────────────
+  let userId: string | null = null
+  let isVip = false
+
+  // Selected channel — default to free, backend overrides per tier
+  let channel = FREE_CHANNEL
+
+  const isSupabaseConfigured = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+
+  if (isSupabaseConfigured) {
+    try {
+      const supabase = await createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (user) {
+        userId = user.id
+        const quota = await getUserQuota(user.id)
+        isVip = quota.tier === 'vip'
+
+        if (isVip) {
+          // VIP: enforce monthly limit (if configured)
+          if (quota.monthlyLimit > 0 && quota.monthlyUsed >= quota.monthlyLimit) {
+            return Response.json(
+              { error: 'MONTHLY_LIMIT_EXCEEDED', used: quota.monthlyUsed, limit: quota.monthlyLimit },
+              { status: 429 }
+            )
+          }
+          // VIP channel — backend hardcodes, ignores any frontend model param
+          channel = VIP_CHANNEL
+          if (!channel.baseUrl || !channel.apiKey) {
+            return Response.json({ error: 'VIP_CHANNEL_NOT_CONFIGURED' }, { status: 503 })
+          }
+        } else {
+          // FREE: enforce daily limit
+          if (quota.dailyUsed >= quota.dailyLimit) {
+            return Response.json(
+              { error: 'DAILY_LIMIT_EXCEEDED', used: quota.dailyUsed, limit: quota.dailyLimit },
+              { status: 429 }
+            )
+          }
+          // FREE channel — backend hardcodes DeepSeek R1
+          channel = FREE_CHANNEL
+        }
+
+        console.log('[chat] uid=%s tier=%s channel=%s', userId, quota.tier, isVip ? 'VIP/Claude' : 'FREE/DeepSeek')
+      } else {
+        // Guest — Redis rate limit, free channel
+        const limitResult = await checkGuestLimits(ip)
+        if (!limitResult.allowed) {
+          return Response.json({ error: limitResult.error }, { status: 429 })
+        }
+        channel = FREE_CHANNEL
+      }
+    } catch (e) {
+      console.error('[chat] auth/quota error:', e)
+    }
+  }
+
+  // ── STEP 4: Stream AI response ────────────────────────────────────────────────
+  const systemMessage = { role: 'system', content: buildSystemPrompt(customInstructions ?? '', aiLang ?? 'zh') }
+
+  const response = await fetch(`${channel.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${relayApiKey}`,
+      Authorization: `Bearer ${channel.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: selectedModel.relay_model_id,
+      model: channel.model,
       messages: [systemMessage, ...messages],
       stream: true,
-      stream_options: { include_usage: true },
     }),
   })
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '')
-    console.error('[chat] AI error', response.status, errorBody)
-    return Response.json(
-      { error: 'AI_SERVICE_ERROR', aiStatus: response.status },
-      { status: 502 }
-    )
+    console.error('[chat] AI error %d channel=%s body=%s', response.status, isVip ? 'vip' : 'free', errorBody.slice(0, 200))
+    return Response.json({ error: 'AI_SERVICE_ERROR', aiStatus: response.status }, { status: 502 })
   }
 
-  // ── Async post-stream tasks ───────────────────────────────────────────────────
-  let resolveUsage!: (u: UsageData | null) => void
-  const usagePromise = new Promise<UsageData | null>(resolve => { resolveUsage = resolve })
-
+  // ── STEP 5: Decrement count after stream (in after(), non-blocking) ───────────
   after(async () => {
-    if (!userId || !supabaseClient) return
-    const usage = await usagePromise
-
-    // Increment chat count (Task E)
+    if (!userId) return
     try {
-      await supabaseClient.rpc('increment_chat_count', { uid: userId, is_vip: userTier === 'vip' })
+      const admin = createAdminClient()
+      await admin.rpc('increment_chat_count', { uid: userId, is_vip: isVip })
     } catch {
-      // DDL not yet applied — non-fatal
-    }
-
-    // Record token usage (legacy, also invalidates quota cache)
-    if (usage) {
-      try {
-        await supabaseClient.from('token_usage').insert({
-          user_id: userId,
-          prompt_tokens: usage.prompt_tokens,
-          completion_tokens: usage.completion_tokens,
-          total_tokens: usage.total_tokens,
-          model: selectedModel.relay_model_id,
-        })
-        quotaCache.delete(userId)
-      } catch {
-        // Non-fatal
-      }
+      // Non-fatal — count columns may not exist yet
     }
   })
 
@@ -375,7 +290,6 @@ export async function POST(req: Request) {
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      let capturedUsage: UsageData | null = null
 
       try {
         while (true) {
@@ -392,27 +306,21 @@ export async function POST(req: Request) {
             if (data === '[DONE]') continue
             try {
               const json = JSON.parse(data)
-              if (json.usage) capturedUsage = json.usage
               const content = json.choices?.[0]?.delta?.content
               if (content) controller.enqueue(encoder.encode(content))
             } catch {}
           }
         }
 
-        // Append branch title (parallel generation, should be ready by now)
+        // Append branch title (should be ready by now)
         const title = await titlePromise
         if (title) controller.enqueue(encoder.encode(TITLE_MARKER + JSON.stringify({ title })))
-
         controller.close()
-        resolveUsage(capturedUsage)
       } catch (err) {
         controller.error(err)
-        resolveUsage(null)
       }
     },
   })
 
-  return new Response(stream, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-  })
+  return new Response(stream, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
 }
