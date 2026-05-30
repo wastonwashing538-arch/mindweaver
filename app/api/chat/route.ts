@@ -1,5 +1,6 @@
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { checkGuestLimits, checkFreeUserRateLimit } from '@/lib/rate-limit'
 
 export const preferredRegion = ['hkg1', 'sin1']
 export const maxDuration = 60
@@ -7,23 +8,6 @@ export const maxDuration = 60
 // Sentinel appended at the end of the stream carrying the AI-generated branch title.
 // The client strips this before rendering and uses it to update the branch title.
 export const TITLE_MARKER = '\n\n__MW_TITLE__'
-
-// Simple in-memory rate limiter for unauthenticated (guest) requests.
-// Per-instance, not global — acceptable for current scale.
-const guestRateLimit = new Map<string, { count: number; resetAt: number }>()
-const GUEST_MAX_RPM = 10 // requests per minute
-
-function checkGuestRateLimit(ip: string): boolean {
-  const now = Date.now()
-  const entry = guestRateLimit.get(ip)
-  if (!entry || now > entry.resetAt) {
-    guestRateLimit.set(ip, { count: 1, resetAt: now + 60_000 })
-    return true
-  }
-  if (entry.count >= GUEST_MAX_RPM) return false
-  entry.count++
-  return true
-}
 
 interface UsageData {
   prompt_tokens: number
@@ -129,12 +113,23 @@ export async function POST(req: Request) {
             { status: 429, headers: { 'Content-Type': 'application/json' } }
           )
         }
+        // Anti-burst for free users
+        if (quota.tier === 'free') {
+          const burst = await checkFreeUserRateLimit(user.id)
+          if (!burst.allowed) {
+            return new Response(
+              JSON.stringify({ error: 'RATE_LIMITED' }),
+              { status: 429, headers: { 'Content-Type': 'application/json' } }
+            )
+          }
+        }
       } else {
-        // Unauthenticated guest — enforce per-IP rate limit
+        // Unauthenticated guest — distributed Redis rate limit (daily + per-minute)
         const ip = (req.headers.get('x-forwarded-for') ?? 'unknown').split(',')[0].trim()
-        if (!checkGuestRateLimit(ip)) {
+        const limitResult = await checkGuestLimits(ip)
+        if (!limitResult.allowed) {
           return new Response(
-            JSON.stringify({ error: 'RATE_LIMITED' }),
+            JSON.stringify({ error: limitResult.error }),
             { status: 429, headers: { 'Content-Type': 'application/json' } }
           )
         }

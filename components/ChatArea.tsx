@@ -6,6 +6,7 @@ import { useBranch, buildContext } from '@/lib/branch-context'
 import { useConversation } from '@/lib/conversation-context'
 import { Branch, Message } from '@/lib/types'
 import { MessageBubble } from './MessageBubble'
+import { GuestLimitModal } from './GuestLimitModal'
 import { cn } from '@/lib/utils'
 import { posthog } from '@/lib/posthog'
 
@@ -84,6 +85,8 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   const abortControllerRef = useRef<AbortController | null>(null)
   const isComposingRef = useRef(false)
   const typingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const [guestLimitOpen, setGuestLimitOpen] = useState(false)
 
   const [heroTitle, setHeroTitle] = useState('')
   const [typedTitle, setTypedTitle] = useState('')
@@ -195,6 +198,12 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
         if (res.status === 429) {
           let data: { error?: string; usedTokens?: number; limit?: number } = {}
           try { data = await res.json() } catch {}
+          if (data.error === 'GUEST_LIMIT_REACHED') {
+            // Remove the empty assistant placeholder and show the modal
+            dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: activeBranch.messages.length + 1 })
+            setGuestLimitOpen(true)
+            return
+          }
           if (data.error === 'TOKEN_LIMIT_EXCEEDED') {
             const used = data.usedTokens?.toLocaleString() ?? '—'
             const limit = data.limit?.toLocaleString() ?? '100,000'
@@ -393,6 +402,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
 
   return (
     <div className="flex flex-col flex-1 h-full bg-neutral-950 overflow-hidden">
+      <GuestLimitModal open={guestLimitOpen} onClose={() => setGuestLimitOpen(false)} />
 
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 md:px-6 py-3 border-b border-neutral-800 shrink-0">

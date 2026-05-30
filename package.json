@@ -13,6 +13,8 @@
     "@sentry/nextjs": "^10.52.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.0",
     "@vercel/analytics": "^2.0.1",
     "ai": "^6.0.156",
     "class-variance-authority": "^0.7.1",
