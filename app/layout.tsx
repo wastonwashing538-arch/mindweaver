@@ -93,6 +93,12 @@ export default function RootLayout({
             <PostHogPageview />
           </Suspense>
           <Analytics />
+          {/* Umami analytics */}
+          <Script
+            src="https://cloud.umami.is/script.js"
+            data-website-id="6da1504d-5d11-4a51-86f9-75e3d96cc957"
+            strategy="afterInteractive"
+          />
           {/* Cloudflare Turnstile — only load when site key is configured */}
           {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && (
             <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="lazyOnload" />
