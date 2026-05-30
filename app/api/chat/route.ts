@@ -127,7 +127,7 @@ async function isContentAllowed(text: string): Promise<boolean> {
     const res = await fetch('https://api.openai.com/v1/moderations', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: text }),
+      body: JSON.stringify({ model: 'omni-moderation-latest', input: text }),
     })
     if (!res.ok) return true // moderation service unavailable → allow
     const { results } = await res.json()
