@@ -9,7 +9,7 @@ interface UpgradeModalProps {
 }
 
 const FREE_FEATURES = ['每日 50 次对话', 'DeepSeek R1 模型']
-const VIP_FEATURES = ['每月 3000 次对话', '全部高级模型', 'Claude 3.5 / GPT-4o / Gemini', '优先响应速度']
+const VIP_FEATURES = ['每月 3000 次对话', 'Claude Sonnet 4.6 模型', '更深的推理与综合能力', '优先响应速度']
 
 export function UpgradeModal({ open, onClose }: UpgradeModalProps) {
   const [loading, setLoading] = useState(false)

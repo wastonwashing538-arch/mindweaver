@@ -83,7 +83,7 @@ function TierModelBadge({
   return (
     <div className="flex items-center gap-2 mb-2">
       <span className="text-[11px] px-2.5 py-1 rounded-full border border-neutral-800 text-neutral-600 select-none">
-        {isVip ? '✦ Claude 4.5 Sonnet' : 'DeepSeek R1'}
+        {isVip ? '✦ Claude Sonnet 4.6' : 'DeepSeek R1'}
       </span>
       {!isVip && (
         <button

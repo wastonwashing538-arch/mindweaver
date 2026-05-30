@@ -19,7 +19,7 @@ const FREE_CHANNEL = {
 const VIP_CHANNEL = {
   baseUrl: process.env.RELAY_CLAUDE_BASE_URL ?? '',
   apiKey:  process.env.RELAY_CLAUDE_API_KEY  ?? '',
-  model:   process.env.VIP_MODEL_ID          ?? 'anthropic/claude-sonnet-4.5',
+  model:   process.env.VIP_MODEL_ID          ?? 'anthropic/claude-sonnet-4.6',
 }
 
 // ── Step 1: Cloudflare Turnstile ──────────────────────────────────────────────
