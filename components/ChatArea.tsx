@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useEffect, useState, KeyboardEvent } from 'react'
-import { ArrowUp, GitBranch } from 'lucide-react'
+import { ArrowUp, GitBranch, Menu } from 'lucide-react'
 import { useBranch, buildContext } from '@/lib/branch-context'
 import { useConversation } from '@/lib/conversation-context'
 import { Branch, Message } from '@/lib/types'
@@ -67,7 +67,11 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
-export function ChatArea() {
+interface ChatAreaProps {
+  onMenuClick: () => void
+}
+
+export function ChatArea({ onMenuClick }: ChatAreaProps) {
   const { state, dispatch } = useBranch()
   const { activeConvId, updateTitle } = useConversation()
   const [input, setInput] = useState('')
@@ -389,26 +393,33 @@ export function ChatArea() {
     <div className="flex flex-col flex-1 h-full bg-neutral-950 overflow-hidden">
 
       {/* Top bar */}
-      <div className="flex items-center px-6 py-3 border-b border-neutral-800 shrink-0">
-        <span className="text-sm font-medium text-neutral-400">
+      <div className="flex items-center gap-3 px-4 md:px-6 py-3 border-b border-neutral-800 shrink-0">
+        <button
+          onClick={onMenuClick}
+          className="md:hidden shrink-0 w-8 h-8 flex items-center justify-center text-neutral-500 hover:text-neutral-200 rounded transition-colors"
+          aria-label="打开菜单"
+        >
+          <Menu size={16} strokeWidth={1.8} />
+        </button>
+        <span className="text-sm font-medium text-neutral-400 truncate min-w-0">
           {activeBranch?.title}
         </span>
       </div>
 
       {showHero ? (
-        <div className="flex-1 flex flex-col items-center justify-center px-6 pb-8 overflow-hidden gap-14">
-          <div className={cn('text-center space-y-5', animatingOut && 'hero-exit')}>
+        <div className="flex-1 flex flex-col items-center justify-center px-4 md:px-6 pb-8 overflow-hidden gap-6 md:gap-14">
+          <div className={cn('text-center space-y-4 md:space-y-5', animatingOut && 'hero-exit')}>
             <h2
-              className="text-[1.85rem] leading-snug text-neutral-200 tracking-tight min-h-[2.5rem]"
+              className="text-2xl md:text-[1.85rem] leading-snug text-neutral-200 tracking-tight min-h-[2rem] md:min-h-[2.5rem]"
               style={{ fontFamily: 'var(--font-serif), Georgia, serif', fontStyle: 'italic' }}
             >
               {typedTitle}
               {typedTitle.length < heroTitle.length && heroTitle.length > 0 && (
-                <span className="inline-block w-px h-7 bg-neutral-400 ml-0.5 align-middle animate-pulse" />
+                <span className="inline-block w-px h-6 md:h-7 bg-neutral-400 ml-0.5 align-middle animate-pulse" />
               )}
             </h2>
             <p
-              className="text-base text-neutral-500 tracking-wide transition-opacity duration-700"
+              className="text-sm md:text-base text-neutral-500 tracking-wide transition-opacity duration-700"
               style={{ opacity: subtitleVisible ? 1 : 0 }}
             >
               {heroSubtitle}
@@ -447,7 +458,7 @@ export function ChatArea() {
         </div>
       ) : (
         <>
-          <div className={cn('flex-1 overflow-y-auto px-6 py-6', showEnterAnims && 'msgs-enter')}>
+          <div className={cn('flex-1 overflow-y-auto px-4 md:px-6 py-6', showEnterAnims && 'msgs-enter')}>
             <div className="max-w-3xl mx-auto space-y-6">
 
               {/* Parent message chain — no actions */}
@@ -492,7 +503,10 @@ export function ChatArea() {
           </div>
 
           {/* Bottom input */}
-          <div className={cn('px-6 pb-6 pt-2 shrink-0', showEnterAnims && 'input-enter')}>
+          <div
+            className={cn('px-4 md:px-6 pt-2 shrink-0', showEnterAnims && 'input-enter')}
+            style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 1.5rem)' }}
+          >
             <div className="max-w-3xl mx-auto">
               <div className="flex items-end gap-2 bg-neutral-800 rounded-3xl px-4 py-2.5 border border-neutral-700 focus-within:border-neutral-500 transition-colors duration-200">
                 <textarea

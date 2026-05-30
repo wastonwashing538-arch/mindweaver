@@ -7,6 +7,7 @@ import { useBranch } from '@/lib/branch-context'
 import { useConversation } from '@/lib/conversation-context'
 import { useAuth } from '@/lib/auth-context'
 import { Branch, Conversation } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 // ─────────────────────────── Color scheme ─────────────────────────────────
 
@@ -340,7 +341,12 @@ const TREE_SNAP_THRESHOLD = 80
 
 // ─────────────────────────── Sidebar ──────────────────────────────────────
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean
+  onClose: () => void
+}
+
+export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { state, dispatch } = useBranch()
   const { conversations, activeConvId, switchConversation, createConversation, deleteConversation } = useConversation()
   const { isLoggedIn } = useAuth()
@@ -350,6 +356,16 @@ export function Sidebar() {
   const [transitionEnabled, setTransitionEnabled] = useState(false)
   const [isAutoExpanded, setIsAutoExpanded] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ branchId: string; x: number; y: number } | null>(null)
+
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    setIsMobile(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
   const isDragging = useRef(false)
   const dragStartX = useRef(0)
@@ -382,7 +398,7 @@ export function Sidebar() {
     }
   }, [contextMenu])
 
-  const showTree = treeWidth >= TREE_SNAP_THRESHOLD
+  const showTree = !isMobile && treeWidth >= TREE_SNAP_THRESHOLD
   const treeOpacity = showTree ? Math.min(1, (treeWidth - TREE_SNAP_THRESHOLD) / 60 + 0.3) : 0
   const asideWidth = showTree ? CAPSULE_WIDTH + treeWidth : CAPSULE_WIDTH
 
@@ -449,13 +465,31 @@ export function Sidebar() {
   }, [handleMouseMove, handleMouseUp])
 
   return (
+    <>
+      {/* Mobile backdrop */}
+      {isMobile && isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={onClose}
+        />
+      )}
+
     <aside
-      style={{
+      style={isMobile ? undefined : {
         width: `${asideWidth}px`,
         transition: transitionEnabled ? 'width 240ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
       }}
-      className="relative shrink-0 bg-neutral-900 border-r border-neutral-800 h-full flex flex-col"
-      onTransitionEnd={() => setTransitionEnabled(false)}
+      className={cn(
+        "bg-neutral-900 border-r border-neutral-800 flex flex-col",
+        isMobile
+          ? cn(
+              "fixed inset-y-0 left-0 z-50 w-72 h-full shadow-2xl",
+              "transition-transform duration-300 ease-in-out",
+              isOpen ? "translate-x-0" : "-translate-x-full"
+            )
+          : "relative shrink-0 h-full"
+      )}
+      onTransitionEnd={() => { if (!isMobile) setTransitionEnabled(false) }}
     >
 
       {/* ── Header: MindWeaver logo + action buttons ── */}
@@ -494,7 +528,8 @@ export function Sidebar() {
           >
             <Clock size={13} strokeWidth={1.8} />
           </button>
-          {view !== 'history' && (
+          {/* Tree toggle — desktop only */}
+          {view !== 'history' && !isMobile && (
             <button
               onClick={handleToggleTree}
               title={showTree ? '收起树图' : '展开树图'}
@@ -507,7 +542,7 @@ export function Sidebar() {
             </button>
           )}
           <button
-            onClick={() => router.push(isLoggedIn ? '/settings' : '/auth')}
+            onClick={() => { router.push(isLoggedIn ? '/settings' : '/auth'); onClose() }}
             title={isLoggedIn ? '设置' : '登录'}
             className="w-6 h-6 rounded flex items-center justify-center text-neutral-500 hover:text-neutral-200 hover:bg-neutral-700 transition-all duration-150"
           >
@@ -524,7 +559,7 @@ export function Sidebar() {
         <HistoryList
           conversations={conversations}
           activeConvId={activeConvId}
-          onSwitch={(id) => { switchConversation(id); setView('capsule') }}
+          onSwitch={(id) => { switchConversation(id); setView('capsule'); if (isMobile) onClose() }}
           onDelete={deleteConversation}
           onBack={() => setView('capsule')}
         />
@@ -553,7 +588,7 @@ export function Sidebar() {
                 }}
               >
                 <button
-                  onClick={() => dispatch({ type: 'SET_ACTIVE_BRANCH', branchId: branch.id })}
+                  onClick={() => { dispatch({ type: 'SET_ACTIVE_BRANCH', branchId: branch.id }); if (isMobile) onClose() }}
                   style={{
                     backgroundColor: level.bg,
                     borderRadius: `${CAPSULE_H / 2}px`,
@@ -593,13 +628,15 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* ── Drag handle (right edge) ── */}
-      <div
-        onMouseDown={handleDragHandleMouseDown}
-        className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-10"
-        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.07)')}
-        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-      />
+      {/* ── Drag handle (right edge) — desktop only ── */}
+      {!isMobile && (
+        <div
+          onMouseDown={handleDragHandleMouseDown}
+          className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-10"
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.07)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        />
+      )}
 
       {/* ── Right-click context menu ── */}
       {contextMenu && (
@@ -637,5 +674,6 @@ export function Sidebar() {
       )}
 
     </aside>
+    </>
   )
 }
