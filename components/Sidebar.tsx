@@ -642,7 +642,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </p>
           <div className="flex items-center justify-center gap-5">
             <a
-              href={process.env.NEXT_PUBLIC_TWITTER_URL ?? 'https://x.com/mindweaverai'}
+              href={process.env.NEXT_PUBLIC_TWITTER_URL ?? 'https://x.com/0xwastonwashing'}
               target="_blank"
               rel="noopener noreferrer"
               title="关注 Twitter / X"
@@ -659,7 +659,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               <span className="text-[10px] text-neutral-600 group-hover:text-neutral-400 transition-colors">Twitter / X</span>
             </a>
             <a
-              href={process.env.NEXT_PUBLIC_TELEGRAM_URL ?? 'https://t.me/mindweaverai'}
+              href={process.env.NEXT_PUBLIC_TELEGRAM_URL ?? 'https://t.me/+mmiJ4gzpf8NlYzJl'}
               target="_blank"
               rel="noopener noreferrer"
               title="加入 Telegram 群"

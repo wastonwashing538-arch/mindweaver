@@ -174,7 +174,8 @@ function TierModelBadge({
       {!isVip && (
         <button
           onClick={onUpgradeClick}
-          className="text-[11px] text-amber-500/60 hover:text-amber-400 transition-colors"
+          className="text-sm font-semibold text-amber-600 hover:text-amber-500
+            hover:translate-x-0.5 transition-all duration-150"
         >
           升级 Pro 解锁 Claude →
         </button>

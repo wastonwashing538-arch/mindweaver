@@ -108,7 +108,7 @@ export function SidebarBetaCard() {
           {/* Main headline */}
           <div>
             <p className="text-xl font-bold leading-tight
-              text-neutral-900 dark:text-neutral-50">
+              text-stone-900 dark:text-white">
               创始 VIP 名额
               <br />免费领取
             </p>
