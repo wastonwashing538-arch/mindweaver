@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Zap } from 'lucide-react'
+import { X } from 'lucide-react'
 import { BetaRegistrationModal } from './BetaRegistrationModal'
 import { useAuth } from '@/lib/auth-context'
 import { useRouter } from 'next/navigation'
@@ -30,9 +30,13 @@ function useCountdown() {
 
 function pad(n: number) { return String(n).padStart(2, '0') }
 
+// Digit box — dark text on light bg, amber text on dark bg
 function DigitBox({ value }: { value: string }) {
   return (
-    <span className="inline-block font-mono font-black text-sm text-amber-400 bg-amber-400/[0.08] border border-amber-400/20 rounded px-1.5 py-0.5 leading-none tabular-nums min-w-[1.75rem] text-center">
+    <span className="inline-block font-mono font-black text-sm
+      text-amber-700 bg-amber-100 border border-amber-300
+      dark:text-amber-400 dark:bg-amber-400/[0.08] dark:border-amber-400/20
+      rounded px-1.5 py-0.5 leading-none tabular-nums min-w-[1.75rem] text-center">
       {value}
     </span>
   )
@@ -102,35 +106,42 @@ export function BetaBanner({ userTier, onClaimed }: BetaBannerProps) {
         onSuccess={handleSuccess}
       />
 
-      {/* ── Banner ─────────────────────────────────────────────────────────── */}
-      <div className="relative shrink-0 bg-neutral-950 border-b border-white/[0.06] overflow-hidden">
+      {/* ── Banner ── */}
+      <div className="relative shrink-0 overflow-hidden
+        bg-amber-50 border-b border-amber-200/80
+        dark:bg-neutral-950 dark:border-white/[0.06]">
 
-        {/* Single amber top rule — the only decorative element */}
-        <div className="absolute top-0 inset-x-0 h-px bg-amber-500/70" />
+        {/* Amber top rule */}
+        <div className="absolute top-0 inset-x-0 h-px
+          bg-amber-500
+          dark:bg-amber-500/70" />
 
-        {/* ── Desktop layout (single row) ── */}
+        {/* ── Desktop (single row) ── */}
         <div className="hidden sm:flex items-center gap-4 px-5 py-3">
 
           {/* Badge */}
-          <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.12em] bg-amber-500 text-black px-2.5 py-[3px] rounded-sm">
+          <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.12em]
+            bg-amber-500 text-black px-2.5 py-[3px] rounded-sm">
             内测
           </span>
 
           {/* Headline */}
-          <p className="shrink-0 text-sm font-black text-black leading-none tracking-tight">
+          <p className="shrink-0 text-sm font-black leading-none tracking-tight
+            text-neutral-900 dark:text-white">
             创始内测名额免费开放
           </p>
 
           {/* Divider */}
-          <span className="text-white/15 select-none">|</span>
+          <span className="text-neutral-300 dark:text-white/15 select-none">|</span>
 
           {/* Subtitle + spots */}
-          <p className="flex-1 text-sm text-white/45 leading-none">
+          <p className="flex-1 text-sm leading-none
+            text-neutral-600 dark:text-white/50">
             50 次 Claude 顶配通道独立额度
             {remaining !== null && (
               <>
-                <span className="mx-2 text-white/15">·</span>
-                <span className="text-amber-400 font-semibold">
+                <span className="mx-2 text-neutral-300 dark:text-white/15">·</span>
+                <span className="font-semibold text-amber-700 dark:text-amber-400">
                   仅剩 {remaining}/100 名额
                 </span>
               </>
@@ -140,21 +151,26 @@ export function BetaBanner({ userTier, onClaimed }: BetaBannerProps) {
           {/* Countdown */}
           <div className="shrink-0 flex items-center gap-1">
             <DigitBox value={pad(h)} />
-            <span className="text-amber-400/40 font-black text-xs select-none">:</span>
+            <span className="font-black text-xs select-none
+              text-amber-500/60 dark:text-amber-400/40">:</span>
             <DigitBox value={pad(m)} />
-            <span className="text-amber-400/40 font-black text-xs select-none">:</span>
+            <span className="font-black text-xs select-none
+              text-amber-500/60 dark:text-amber-400/40">:</span>
             <DigitBox value={pad(s)} />
           </div>
 
           {/* CTA */}
           {isClaimed ? (
-            <span className="shrink-0 text-xs font-bold text-emerald-400 tracking-wide">
+            <span className="shrink-0 text-xs font-bold tracking-wide
+              text-emerald-700 dark:text-emerald-400">
               ✓ 已激活
             </span>
           ) : (
             <button
               onClick={handleCta}
-              className="shrink-0 text-[11px] font-black bg-amber-500 text-black px-4 py-2 rounded hover:bg-amber-400 active:scale-[0.97] transition-all whitespace-nowrap"
+              className="shrink-0 text-[11px] font-black px-4 py-2 rounded
+                bg-amber-500 text-black hover:bg-amber-400
+                active:scale-[0.97] transition-all whitespace-nowrap"
             >
               {isLoggedIn ? '立即领取 →' : '登录后领取 →'}
             </button>
@@ -164,24 +180,33 @@ export function BetaBanner({ userTier, onClaimed }: BetaBannerProps) {
           <button
             onClick={dismiss}
             aria-label="关闭活动通知"
-            className="shrink-0 w-6 h-6 flex items-center justify-center text-white/20 hover:text-white/60 transition-colors rounded"
+            className="shrink-0 w-6 h-6 flex items-center justify-center rounded transition-colors
+              text-neutral-400 hover:text-neutral-700
+              dark:text-white/20 dark:hover:text-white/60"
           >
             <X size={13} />
           </button>
         </div>
 
-        {/* ── Mobile layout (two rows) ── */}
+        {/* ── Mobile (two rows) ── */}
         <div className="sm:hidden px-4 py-2.5 space-y-2">
 
           {/* Row 1: badge + headline + dismiss */}
           <div className="flex items-center gap-2.5">
-            <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.12em] bg-amber-500 text-black px-2 py-[2px] rounded-sm">
+            <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.12em]
+              bg-amber-500 text-black px-2 py-[2px] rounded-sm">
               内测
             </span>
-            <p className="flex-1 text-xs font-bold text-white leading-none">
+            <p className="flex-1 text-xs font-black leading-none
+              text-neutral-900 dark:text-white">
               创始内测名额免费开放 — 50 次 Claude 额度
             </p>
-            <button onClick={dismiss} className="shrink-0 text-white/20 hover:text-white/60 transition-colors">
+            <button
+              onClick={dismiss}
+              className="shrink-0 transition-colors
+                text-neutral-400 hover:text-neutral-700
+                dark:text-white/20 dark:hover:text-white/60"
+            >
               <X size={13} />
             </button>
           </div>
@@ -189,23 +214,28 @@ export function BetaBanner({ userTier, onClaimed }: BetaBannerProps) {
           {/* Row 2: spots + countdown + CTA */}
           <div className="flex items-center gap-2.5">
             {remaining !== null && (
-              <span className="text-[11px] text-amber-400 font-semibold">
+              <span className="text-[11px] font-semibold
+                text-amber-700 dark:text-amber-400">
                 剩 {remaining}/100
               </span>
             )}
             <div className="flex items-center gap-0.5 flex-1">
               <DigitBox value={pad(h)} />
-              <span className="text-amber-400/40 font-black text-[10px] px-0.5">:</span>
+              <span className="font-black text-[10px] px-0.5
+                text-amber-500/60 dark:text-amber-400/40">:</span>
               <DigitBox value={pad(m)} />
-              <span className="text-amber-400/40 font-black text-[10px] px-0.5">:</span>
+              <span className="font-black text-[10px] px-0.5
+                text-amber-500/60 dark:text-amber-400/40">:</span>
               <DigitBox value={pad(s)} />
             </div>
             {isClaimed ? (
-              <span className="text-[11px] font-bold text-emerald-400">✓ 已激活</span>
+              <span className="text-[11px] font-bold
+                text-emerald-700 dark:text-emerald-400">✓ 已激活</span>
             ) : (
               <button
                 onClick={handleCta}
-                className="text-[11px] font-black bg-amber-500 text-black px-3.5 py-1.5 rounded active:scale-95 transition-transform whitespace-nowrap"
+                className="text-[11px] font-black px-3.5 py-1.5 rounded
+                  bg-amber-500 text-black active:scale-95 transition-transform whitespace-nowrap"
               >
                 {isLoggedIn ? '立即领取 →' : '登录领取 →'}
               </button>
