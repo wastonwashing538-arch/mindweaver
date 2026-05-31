@@ -8,6 +8,7 @@ import { useConversation } from '@/lib/conversation-context'
 import { useAuth } from '@/lib/auth-context'
 import { Branch, Conversation } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { SidebarBetaCard } from './SidebarBetaCard'
 
 // ─────────────────────────── Color scheme ─────────────────────────────────
 
@@ -626,6 +627,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             panelWidth={asideWidth}
           />
         </div>
+      )}
+
+      {/* ── Beta activity card ── */}
+      {view !== 'history' && (
+        <SidebarBetaCard />
       )}
 
       {/* ── Social links ── */}

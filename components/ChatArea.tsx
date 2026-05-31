@@ -7,7 +7,6 @@ import { useConversation } from '@/lib/conversation-context'
 import { useAuth } from '@/lib/auth-context'
 import { Branch, Message } from '@/lib/types'
 import { MessageBubble } from './MessageBubble'
-import { BetaBanner } from './BetaBanner'
 import { GuestLimitModal } from './GuestLimitModal'
 import { UpgradeModal } from './UpgradeModal'
 import { cn } from '@/lib/utils'
@@ -605,12 +604,6 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
         reason={upgradeReason}
         onClose={() => { setUpgradeOpen(false); setUpgradeReason(undefined) }}
         onBetaClaimed={() => setUserTier('beta_vip')}
-      />
-
-      {/* Beta activity banner — shown to free/guest users while beta is active */}
-      <BetaBanner
-        userTier={userTier}
-        onClaimed={() => setUserTier('beta_vip')}
       />
 
       {/* Top bar */}
