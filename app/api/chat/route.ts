@@ -62,7 +62,7 @@ async function isContentAllowed(text: string): Promise<boolean> {
 // ── Step 3: User quota (admin client bypasses RLS) ────────────────────────────
 
 interface Quota {
-  tier: 'free' | 'starter' | 'standard' | 'vip'
+  tier: 'free' | 'starter' | 'standard' | 'vip' | 'beta_vip'
   dailyUsed: number
   dailyLimit: number
   monthlyUsed: number
@@ -86,7 +86,7 @@ async function getUserQuota(userId: string): Promise<Quota> {
     const isNewMonth = !data.monthly_reset_at || new Date(data.monthly_reset_at) < monthStart
 
     return {
-      tier:         (data.tier ?? 'free') as 'free' | 'starter' | 'standard' | 'vip',
+      tier:         (data.tier ?? 'free') as 'free' | 'starter' | 'standard' | 'vip' | 'beta_vip',
       dailyUsed:    isNewDay   ? 0 : (data.chat_count_daily_used   ?? 0),
       dailyLimit:   data.chat_count_daily_limit   ?? 50,
       monthlyUsed:  isNewMonth ? 0 : (data.chat_count_monthly_used ?? 0),

@@ -99,7 +99,7 @@ function UsageSection() {
   }
 
   const tier = usage.quota.tier
-  const isVip = tier === 'vip'
+  const isVip = tier !== 'free'
   const { chatQuota } = usage
 
   // Count-based display (primary when DDL is applied)

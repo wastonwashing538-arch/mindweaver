@@ -115,7 +115,7 @@ function PresetPanel({
   onUpgradeNeeded,
 }: {
   activePresetId: string | null
-  userTier: 'free' | 'vip' | 'starter' | 'standard' | 'guest'
+  userTier: 'free' | 'vip' | 'starter' | 'standard' | 'beta_vip' | 'guest'
   onSelect: (preset: Preset | null) => void
   onUpgradeNeeded: () => void
 }) {
@@ -162,14 +162,14 @@ function TierModelBadge({
   userTier,
   onUpgradeClick,
 }: {
-  userTier: 'free' | 'vip' | 'starter' | 'standard' | 'guest'
+  userTier: 'free' | 'vip' | 'starter' | 'standard' | 'beta_vip' | 'guest'
   onUpgradeClick: () => void
 }) {
   const isVip = userTier !== 'free' && userTier !== 'guest'
   return (
     <div className="flex items-center gap-2 mb-2">
       <span className="text-[11px] px-2.5 py-1 rounded-full border border-neutral-800 text-neutral-600 select-none">
-        {isVip ? '✦ Claude Sonnet 4.6' : 'DeepSeek R1'}
+        {isVip ? (userTier === 'beta_vip' ? '⚡ Claude Sonnet 4.6 (内测)' : '✦ Claude Sonnet 4.6') : 'DeepSeek R1'}
       </span>
       {!isVip && (
         <button
@@ -205,7 +205,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   const [guestLimitOpen, setGuestLimitOpen] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [upgradeReason, setUpgradeReason] = useState<'daily_limit' | 'preset_requires_paid' | 'monthly_limit' | undefined>(undefined)
-  const [userTier, setUserTier] = useState<'free' | 'vip' | 'starter' | 'standard' | 'guest'>('guest')
+  const [userTier, setUserTier] = useState<'free' | 'vip' | 'starter' | 'standard' | 'beta_vip' | 'guest'>('guest')
   const [activePreset, setActivePreset] = useState<Preset | null>(null)
   const turnstileTokenRef = useRef<string | null>(null)
   const turnstileWidgetRef = useRef<string | null>(null)  // widget ID for reset
@@ -214,7 +214,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   useEffect(() => {
     if (!isLoggedIn) { setUserTier('guest'); return }
     fetch('/api/usage').then(r => r.ok ? r.json() : null).then(data => {
-      if (data?.quota?.tier) setUserTier(data.quota.tier as 'free' | 'vip' | 'starter' | 'standard')
+      if (data?.quota?.tier) setUserTier(data.quota.tier as 'free' | 'vip' | 'starter' | 'standard' | 'beta_vip')
       else setUserTier('free')
     }).catch(() => setUserTier('free'))
   }, [isLoggedIn])
@@ -599,7 +599,12 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
       {/* Turnstile invisible widget container */}
       <div id="mw-turnstile-container" className="hidden" aria-hidden="true" />
       <GuestLimitModal open={guestLimitOpen} onClose={() => setGuestLimitOpen(false)} />
-      <UpgradeModal open={upgradeOpen} reason={upgradeReason} onClose={() => { setUpgradeOpen(false); setUpgradeReason(undefined) }} />
+      <UpgradeModal
+        open={upgradeOpen}
+        reason={upgradeReason}
+        onClose={() => { setUpgradeOpen(false); setUpgradeReason(undefined) }}
+        onBetaClaimed={() => setUserTier('beta_vip')}
+      />
 
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 md:px-6 py-3 border-b border-neutral-800 shrink-0">

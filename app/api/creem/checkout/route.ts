@@ -10,13 +10,33 @@ const STANDARD_PRODUCT_ID = process.env.NEXT_PUBLIC_CREEM_STANDARD_PRODUCT_ID
 // Legacy fallback: if only one product is configured, use it for both plans
 const LEGACY_PRODUCT_ID   = process.env.NEXT_PUBLIC_CREEM_VIP_PRODUCT_ID
 
+function getProductId(plan: 'starter' | 'standard') {
+  return plan === 'starter'
+    ? (STARTER_PRODUCT_ID ?? LEGACY_PRODUCT_ID)
+    : (STANDARD_PRODUCT_ID ?? LEGACY_PRODUCT_ID)
+}
+
+function getConfigSummary() {
+  return {
+    hasApiKey: Boolean(process.env.CREEM_API_KEY),
+    hasStarterProduct: Boolean(STARTER_PRODUCT_ID),
+    hasStandardProduct: Boolean(STANDARD_PRODUCT_ID),
+    hasLegacyProduct: Boolean(LEGACY_PRODUCT_ID),
+    hasAppUrl: Boolean(process.env.NEXT_PUBLIC_CREEM_APP_URL),
+    testMode: process.env.CREEM_TEST_MODE === 'true',
+  }
+}
+
 export async function POST(req: Request) {
   const apiKey = process.env.CREEM_API_KEY
   const appUrl = process.env.NEXT_PUBLIC_CREEM_APP_URL ?? 'https://mindweaver-uztu.vercel.app'
 
   if (!apiKey) {
     console.error('[creem/checkout] CREEM_API_KEY not set')
-    return Response.json({ error: 'Payment not configured' }, { status: 503 })
+    return Response.json(
+      { error: 'Payment not configured', detail: { reason: 'CREEM_API_KEY missing', config: getConfigSummary() } },
+      { status: 503 }
+    )
   }
 
   // Parse plan — default to standard
@@ -27,13 +47,20 @@ export async function POST(req: Request) {
   } catch { /* body might be empty */ }
 
   // Resolve product ID: try plan-specific → fallback to legacy single-product
-  const productId = plan === 'starter'
-    ? (STARTER_PRODUCT_ID ?? LEGACY_PRODUCT_ID)
-    : (STANDARD_PRODUCT_ID ?? LEGACY_PRODUCT_ID)
+  const productId = getProductId(plan)
 
   if (!productId) {
     console.error('[creem/checkout] No product ID for plan=%s. Set NEXT_PUBLIC_CREEM_STARTER_PRODUCT_ID, NEXT_PUBLIC_CREEM_STANDARD_PRODUCT_ID, or NEXT_PUBLIC_CREEM_VIP_PRODUCT_ID', plan)
-    return Response.json({ error: 'Payment not configured' }, { status: 503 })
+    return Response.json(
+      {
+        error: 'Payment not configured',
+        detail: {
+          reason: `No product mapped for plan=${plan}`,
+          config: getConfigSummary(),
+        },
+      },
+      { status: 503 }
+    )
   }
 
   const supabase = await createClient()
