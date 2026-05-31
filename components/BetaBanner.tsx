@@ -117,7 +117,7 @@ export function BetaBanner({ userTier, onClaimed }: BetaBannerProps) {
           </span>
 
           {/* Headline */}
-          <p className="shrink-0 text-sm font-black text-white leading-none tracking-tight">
+          <p className="shrink-0 text-sm font-black text-black leading-none tracking-tight">
             创始内测名额免费开放
           </p>
 
