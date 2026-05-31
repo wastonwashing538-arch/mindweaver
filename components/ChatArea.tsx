@@ -70,16 +70,102 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+// ── Web3 / Dev Preset Panel ────────────────────────────────────────────────────
+
+interface Preset {
+  id: string
+  icon: string
+  label: string
+  badge: string
+  channel: 'free' | 'paid'
+  instruction: string
+}
+
+const PRESETS: Preset[] = [
+  {
+    id: 'tokenomics',
+    icon: '📊',
+    label: '代币经济学投研',
+    badge: 'R1',
+    channel: 'free',
+    instruction: `你现在是顶级加密货币分析师。当用户提供白皮书或代币信息时，从以下维度深度分析：\n1. 价值捕获机制：协议如何产生收益，费用流向\n2. 通胀模型：代币释放曲线、年通胀率、供应上限\n3. 锁仓与抛压：团队/投资人锁仓期、解锁时间表\n4. 竞争护城河：相较同类协议的核心差异化\n5. 风险信号：集中持有、治理风险、审计状态\n每次分析结尾给出：风险评级（1-10）+ 一句话核心判断。`,
+  },
+  {
+    id: 'audit',
+    icon: '⚡️',
+    label: '智能合约审计',
+    badge: 'Claude',
+    channel: 'paid',
+    instruction: `你现在是顶级智能合约安全审计专家（Solidity/EVM）。当用户粘贴合约代码时，执行严格安全扫描：\n1. 重入攻击（Reentrancy）：外部调用前的状态变更\n2. 整数溢出/下溢：unchecked 块与 SafeMath\n3. 访问控制：权限逻辑漏洞\n4. 闪电贷攻击面：价格操控与预言机风险\n5. 逻辑漏洞：边界条件\n6. Gas 优化建议\n每个漏洞输出：严重级别（Critical/High/Medium/Low）+ 代码定位 + 修复方案。`,
+  },
+  {
+    id: 'automation',
+    icon: '🤖',
+    label: '链上自动化脚本',
+    badge: 'Claude',
+    channel: 'paid',
+    instruction: `你现在是精通 Web3 自动化的全栈工程师。所有代码必须：\n- 技术栈优先级：Python > Playwright > Ethers.js/Web3.py\n- 完整可运行，不写伪代码，包含错误处理与重试\n- 敏感数据通过环境变量注入\n- 关键步骤添加中文注释\n- 默认使用 Telegram Bot 或 Bark 推送通知\n擅长：链上大户地址监控、Twitter 关键词检测、DEX 价格预警、NFT 地板价监控、Gas 优化批量交易。`,
+  },
+]
+
+function PresetPanel({
+  activePresetId,
+  userTier,
+  onSelect,
+  onUpgradeNeeded,
+}: {
+  activePresetId: string | null
+  userTier: 'free' | 'vip' | 'starter' | 'standard' | 'guest'
+  onSelect: (preset: Preset | null) => void
+  onUpgradeNeeded: () => void
+}) {
+  return (
+    <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none mb-2">
+      {PRESETS.map(preset => {
+        const isActive = activePresetId === preset.id
+        const isPaidLocked = preset.channel === 'paid' && (userTier === 'free' || userTier === 'guest')
+        return (
+          <button
+            key={preset.id}
+            onClick={() => {
+              if (isPaidLocked) { onUpgradeNeeded(); return }
+              onSelect(isActive ? null : preset)
+            }}
+            title={isPaidLocked ? `需要 Pro 套餐解锁` : preset.label}
+            className={cn(
+              'shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all duration-150',
+              isActive
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-neutral-800/50 text-neutral-500 border border-neutral-800 hover:text-neutral-300 hover:border-neutral-700'
+            )}
+          >
+            <span>{preset.icon}</span>
+            <span>{preset.label}</span>
+            <span className={cn(
+              'text-[10px] px-1.5 py-0.5 rounded ml-0.5',
+              preset.channel === 'paid'
+                ? (isPaidLocked ? 'text-neutral-600 bg-neutral-800' : 'text-amber-500/70 bg-amber-500/10')
+                : 'text-neutral-600 bg-neutral-800'
+            )}>
+              {isPaidLocked ? '🔒' : preset.badge}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Tier-based model badge (read-only, no user selection) ────────────────────
 
 function TierModelBadge({
   userTier,
   onUpgradeClick,
 }: {
-  userTier: 'free' | 'vip' | 'guest'
+  userTier: 'free' | 'vip' | 'starter' | 'standard' | 'guest'
   onUpgradeClick: () => void
 }) {
-  const isVip = userTier === 'vip'
+  const isVip = userTier !== 'free' && userTier !== 'guest'
   return (
     <div className="flex items-center gap-2 mb-2">
       <span className="text-[11px] px-2.5 py-1 rounded-full border border-neutral-800 text-neutral-600 select-none">
@@ -118,7 +204,9 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
 
   const [guestLimitOpen, setGuestLimitOpen] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
-  const [userTier, setUserTier] = useState<'free' | 'vip' | 'guest'>('guest')
+  const [upgradeReason, setUpgradeReason] = useState<'daily_limit' | 'preset_requires_paid' | 'monthly_limit' | undefined>(undefined)
+  const [userTier, setUserTier] = useState<'free' | 'vip' | 'starter' | 'standard' | 'guest'>('guest')
+  const [activePreset, setActivePreset] = useState<Preset | null>(null)
   const turnstileTokenRef = useRef<string | null>(null)
   const turnstileWidgetRef = useRef<string | null>(null)  // widget ID for reset
 
@@ -126,7 +214,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   useEffect(() => {
     if (!isLoggedIn) { setUserTier('guest'); return }
     fetch('/api/usage').then(r => r.ok ? r.json() : null).then(data => {
-      if (data?.quota?.tier) setUserTier(data.quota.tier as 'free' | 'vip')
+      if (data?.quota?.tier) setUserTier(data.quota.tier as 'free' | 'vip' | 'starter' | 'standard')
       else setUserTier('free')
     }).catch(() => setUserTier('free'))
   }, [isLoggedIn])
@@ -264,6 +352,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
           customInstructions,
           aiLang,
           firstUserMessage,
+          presetInstruction: activePreset?.instruction ?? undefined,
           turnstileToken: turnstileTokenRef.current ?? undefined,
         }),
         signal: abortController.signal,
@@ -285,6 +374,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
           if (data.error === 'DAILY_LIMIT_EXCEEDED' || data.error === 'MONTHLY_LIMIT_EXCEEDED') {
             dispatch({ type: 'TRIM_MESSAGES', branchId, toIndex: trimToIndex })
             posthog.capture('quota_exceeded', { error: data.error, used: data.used, limit: data.limit })
+            setUpgradeReason(data.error === 'DAILY_LIMIT_EXCEEDED' ? 'daily_limit' : 'monthly_limit')
             setUpgradeOpen(true)
             return
           }
@@ -386,6 +476,13 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
   async function sendMessage() {
     const rawContent = input.trim()
     if (!rawContent || isCurrentBranchStreaming) return
+
+    // Block paid preset for free/guest users → show upgrade modal
+    if (activePreset?.channel === 'paid' && (userTier === 'free' || userTier === 'guest')) {
+      setUpgradeReason('preset_requires_paid')
+      setUpgradeOpen(true)
+      return
+    }
 
     const fromEmpty = isEmptyState
     setInput('')
@@ -502,7 +599,7 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
       {/* Turnstile invisible widget container */}
       <div id="mw-turnstile-container" className="hidden" aria-hidden="true" />
       <GuestLimitModal open={guestLimitOpen} onClose={() => setGuestLimitOpen(false)} />
-      <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
+      <UpgradeModal open={upgradeOpen} reason={upgradeReason} onClose={() => { setUpgradeOpen(false); setUpgradeReason(undefined) }} />
 
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 md:px-6 py-3 border-b border-neutral-800 shrink-0">
@@ -566,8 +663,17 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
                 <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
               </button>
             </div>
+            {/* Preset panel */}
+            <div className="mt-3">
+              <PresetPanel
+                activePresetId={activePreset?.id ?? null}
+                userTier={userTier}
+                onSelect={setActivePreset}
+                onUpgradeNeeded={() => { setUpgradeReason('preset_requires_paid'); setUpgradeOpen(true) }}
+              />
+            </div>
             {/* Model badge — also visible in hero/empty state */}
-            <div className="mt-2">
+            <div className="mt-1">
               <TierModelBadge userTier={userTier} onUpgradeClick={() => setUpgradeOpen(true)} />
             </div>
           </div>
@@ -624,6 +730,21 @@ export function ChatArea({ onMenuClick }: ChatAreaProps) {
             style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 1.5rem)' }}
           >
             <div className="max-w-3xl mx-auto">
+              {/* Preset panel */}
+              <PresetPanel
+                activePresetId={activePreset?.id ?? null}
+                userTier={userTier}
+                onSelect={setActivePreset}
+                onUpgradeNeeded={() => { setUpgradeReason('preset_requires_paid'); setUpgradeOpen(true) }}
+              />
+              {/* Active preset indicator */}
+              {activePreset && (
+                <div className="flex items-center gap-2 px-0.5 mb-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span className="text-[11px] text-amber-400/80">专家工作台：{activePreset.icon} {activePreset.label}</span>
+                  <button onClick={() => setActivePreset(null)} className="text-[11px] text-neutral-600 hover:text-neutral-400 ml-auto transition-colors">✕</button>
+                </div>
+              )}
               {/* Model badge (tier-based, read-only) */}
               <TierModelBadge userTier={userTier} onUpgradeClick={() => setUpgradeOpen(true)} />
               <div className="flex items-end gap-2 bg-neutral-800 rounded-3xl px-4 py-2.5 border border-neutral-700 focus-within:border-neutral-500 transition-colors duration-200">

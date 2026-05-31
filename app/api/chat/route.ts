@@ -62,7 +62,7 @@ async function isContentAllowed(text: string): Promise<boolean> {
 // ── Step 3: User quota (admin client bypasses RLS) ────────────────────────────
 
 interface Quota {
-  tier: 'free' | 'vip'
+  tier: 'free' | 'starter' | 'standard' | 'vip'
   dailyUsed: number
   dailyLimit: number
   monthlyUsed: number
@@ -86,7 +86,7 @@ async function getUserQuota(userId: string): Promise<Quota> {
     const isNewMonth = !data.monthly_reset_at || new Date(data.monthly_reset_at) < monthStart
 
     return {
-      tier:         (data.tier ?? 'free') as 'free' | 'vip',
+      tier:         (data.tier ?? 'free') as 'free' | 'starter' | 'standard' | 'vip',
       dailyUsed:    isNewDay   ? 0 : (data.chat_count_daily_used   ?? 0),
       dailyLimit:   data.chat_count_daily_limit   ?? 50,
       monthlyUsed:  isNewMonth ? 0 : (data.chat_count_monthly_used ?? 0),
@@ -121,9 +121,10 @@ async function generateBranchTitle(userMessage: string): Promise<string> {
 
 // ── System prompt ──────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(customInstructions: string, aiLang: string): string {
+function buildSystemPrompt(customInstructions: string, aiLang: string, presetInstruction?: string): string {
   const langNote = aiLang === 'en' ? '\n\nPlease respond in English.' : ''
   const customPart = customInstructions?.trim() ? `\n\n## 用户补充说明\n${customInstructions.trim()}` : ''
+  const presetPart = presetInstruction?.trim() ? `\n\n## 专家工作台模式（覆盖默认行为）\n${presetInstruction.trim()}` : ''
   return `你是用户的私人思考伙伴，运行在一个树状对话工具里。
 
 工具特点：每条对话可以分叉成多个方向，用户在不同分支里分别深入探索。
@@ -155,13 +156,13 @@ function buildSystemPrompt(customInstructions: string, aiLang: string): string {
 - [方向二，8字以内]
 - [方向三，8字以内]
 
-这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。${langNote}${customPart}`
+这三个方向要真正有价值、互相不重叠、让用户看到就想点开。不要写"深入了解XX"这类废话。${presetPart}${langNote}${customPart}`
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  const { messages, customInstructions, aiLang, firstUserMessage, turnstileToken } = await req.json()
+  const { messages, customInstructions, aiLang, firstUserMessage, turnstileToken, presetInstruction } = await req.json()
   const ip = (req.headers.get('x-forwarded-for') ?? '0.0.0.0').split(',')[0].trim()
 
   // Start title generation in parallel — it's non-blocking and uses free channel
@@ -209,7 +210,7 @@ export async function POST(req: Request) {
       if (user) {
         userId = user.id
         const quota = await getUserQuota(user.id)
-        isVip = quota.tier === 'vip'
+        isVip = quota.tier !== 'free'
 
         if (isVip) {
           // VIP: enforce monthly limit (if configured)
@@ -251,7 +252,7 @@ export async function POST(req: Request) {
   }
 
   // ── STEP 4: Stream AI response ────────────────────────────────────────────────
-  const systemMessage = { role: 'system', content: buildSystemPrompt(customInstructions ?? '', aiLang ?? 'zh') }
+  const systemMessage = { role: 'system', content: buildSystemPrompt(customInstructions ?? '', aiLang ?? 'zh', presetInstruction) }
 
   const response = await fetch(`${channel.baseUrl}/chat/completions`, {
     method: 'POST',
