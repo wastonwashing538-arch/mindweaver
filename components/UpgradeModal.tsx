@@ -1,8 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Zap, Check, Star, Clock } from 'lucide-react'
+import { X, Zap, Check, Star, Clock, Gift } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { BetaRegistrationModal } from './BetaRegistrationModal'
+import { useAuth } from '@/lib/auth-context'
+import { useRouter } from 'next/navigation'
 
 interface UpgradeModalProps {
   open: boolean
@@ -28,8 +31,10 @@ const REASON_SUBTITLE: Record<string, string> = {
 }
 
 export function UpgradeModal({ open, onClose, reason, onBetaClaimed }: UpgradeModalProps) {
+  const router = useRouter()
+  const { isLoggedIn } = useAuth()
   const [betaStatus, setBetaStatus] = useState<{ remaining: number; userIsBeta: boolean } | null>(null)
-  const [claiming, setClaiming] = useState(false)
+  const [showRegModal, setShowRegModal] = useState(false)
   const [claimed, setClaimed] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,33 +54,28 @@ export function UpgradeModal({ open, onClose, reason, onBetaClaimed }: UpgradeMo
   const alreadyBeta = betaStatus?.userIsBeta || claimed
   const pct = Math.round(((BETA_TOTAL - remaining) / BETA_TOTAL) * 100)
 
-  async function handleClaim() {
-    setClaiming(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/beta/claim', { method: 'POST' })
-      const data = await res.json()
-      if (data.ok) {
-        setClaimed(true)
-        onBetaClaimed?.()
-        // Reload page after 2s to refresh tier state
-        setTimeout(() => window.location.reload(), 2000)
-      } else if (data.error === 'Unauthorized') {
-        setError('请先登录再申请内测名额。')
-      } else if (data.error === 'BETA_FULL') {
-        setError('100 个名额已全部抢光！关注我们的 Twitter 等候正式上线。')
-        setBetaStatus(prev => prev ? { ...prev, remaining: 0 } : null)
-      } else {
-        setError(data.message ?? '申请失败，请重试。')
-      }
-    } catch {
-      setError('网络错误，请重试。')
-    } finally {
-      setClaiming(false)
+  function handleClaimClick() {
+    if (!isLoggedIn) {
+      onClose()
+      router.push('/auth?redirect=/')
+      return
     }
+    setShowRegModal(true)
+  }
+
+  function handleRegistrationSuccess() {
+    setClaimed(true)
+    onBetaClaimed?.()
   }
 
   return (
+    <>
+      <BetaRegistrationModal
+        open={showRegModal}
+        spotsLeft={remaining}
+        onClose={() => setShowRegModal(false)}
+        onSuccess={handleRegistrationSuccess}
+      />
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4"
       onClick={!claimed ? onClose : undefined}
@@ -95,88 +95,77 @@ export function UpgradeModal({ open, onClose, reason, onBetaClaimed }: UpgradeMo
         )}
 
         {claimed ? (
-          /* ── Success state ── */
+          /* ── Success ── */
           <div className="px-6 py-10 flex flex-col items-center text-center gap-4">
-            <div className="w-14 h-14 rounded-full bg-amber-500/15 flex items-center justify-center">
-              <Star size={24} className="text-amber-400 fill-amber-400/30" />
-            </div>
-            <div>
-              <h2 className="text-neutral-100 font-semibold text-base mb-1.5">🎉 内测额度已到账！</h2>
-              <p className="text-neutral-400 text-sm leading-relaxed">
-                50 次 Claude Sonnet 4.6 已添加到你的账户。<br />
-                页面即将刷新，请稍候…
-              </p>
-            </div>
+            <div className="text-4xl">🎉</div>
+            <h2 className="text-white font-black text-lg">内测额度已到账！</h2>
+            <p className="text-neutral-400 text-sm">50 次 Claude 高速调用已激活，页面即将刷新…</p>
             <div className="flex items-center gap-2 text-amber-400/60 text-xs">
-              <Zap size={12} className="animate-pulse" />
-              正在激活…
+              <Zap size={12} className="animate-pulse" />正在激活…
             </div>
           </div>
         ) : (
-          /* ── Claim state ── */
           <>
             {/* Header */}
-            <div className="relative px-5 pt-6 pb-4">
-              {/* Badge */}
+            <div className="bg-gradient-to-b from-black to-neutral-950 px-5 pt-5 pb-4 border-b border-amber-500/20">
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 uppercase tracking-wider flex items-center gap-1.5">
-                  <Clock size={9} />
-                  限时 48 小时
+                <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-amber-500 text-black flex items-center gap-1">
+                  🔥 内测阶段
                 </span>
-                <span className="text-[10px] text-neutral-600">支付网关审核期间专属</span>
+                <span className="text-[10px] text-neutral-500">支付网关审核期间专属</span>
               </div>
-
-              <h2 className="text-neutral-100 font-semibold text-[15px] leading-snug mb-1.5">
-                MindWeaver 创始团队内测特招
+              <h2 className="text-white font-black text-base leading-snug mb-1">
+                创始团队限时内测特惠开启！
               </h2>
-              <p className="text-neutral-500 text-xs leading-relaxed">{subtitle}</p>
+              <p className="text-neutral-400 text-xs leading-relaxed">
+                {subtitle}
+              </p>
             </div>
 
-            {/* Spots progress */}
-            <div className="px-5 pb-4">
-              <div className="bg-neutral-800/60 rounded-xl p-3.5 border border-neutral-700/40">
+            {/* Body — exact copy from spec */}
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-sm text-neutral-300 leading-relaxed">
+                由于海外 Creem 支付网关正在进行最后的人工合规审计，我们决定将首批{' '}
+                <span className="text-white font-black">100 个 VIP 席位</span>{' '}
+                免费赠送给社区技术流。
+              </p>
+
+              <ul className="space-y-2.5">
+                <li className="flex items-start gap-2.5">
+                  <Gift size={14} className="text-amber-400 mt-0.5 shrink-0" />
+                  <span className="text-sm text-neutral-200">
+                    立刻到账 <span className="text-white font-black">50 次</span> 顶配 Claude 高速独立通道额度
+                  </span>
+                </li>
+                <li className="flex items-start gap-2.5">
+                  <Zap size={14} className="text-amber-400 mt-0.5 shrink-0" />
+                  <span className="text-sm text-neutral-200">
+                    享有正式上线后首月订阅{' '}
+                    <span className="text-amber-400 font-black">半价特权优惠券</span>
+                  </span>
+                </li>
+              </ul>
+
+              {/* Progress */}
+              <div className="bg-black/60 rounded-xl p-3 border border-neutral-800">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-neutral-400 font-medium">内测名额进度</span>
-                  <span className={cn(
-                    'text-xs font-semibold',
-                    isFull ? 'text-red-400' : remaining <= 20 ? 'text-amber-400' : 'text-emerald-400'
-                  )}>
-                    {isFull ? '已满员' : `仅剩 ${remaining} 个`}
+                  <span className="text-[11px] font-bold text-neutral-400">名额进度</span>
+                  <span className={cn('text-[11px] font-black', isFull ? 'text-red-400' : remaining <= 20 ? 'text-red-400' : 'text-amber-300')}>
+                    {isFull ? '已满员' : `剩余 ${remaining}/100`}
                   </span>
                 </div>
-                <div className="h-2 rounded-full bg-neutral-700 overflow-hidden mb-1.5">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-700"
-                    style={{ width: `${Math.max(pct, 3)}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-[10px] text-neutral-600">
-                  <span>已抢 {BETA_TOTAL - remaining}/{BETA_TOTAL}</span>
-                  <span>100 名额上限</span>
+                <div className="h-2.5 rounded-full bg-neutral-800 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-700"
+                    style={{ width: `${Math.max(pct, 2)}%` }} />
                 </div>
               </div>
-            </div>
-
-            {/* Perks */}
-            <div className="px-5 pb-4">
-              <p className="text-[11px] text-neutral-500 font-medium mb-2">内测 VIP 包含：</p>
-              <ul className="space-y-1.5">
-                {BETA_PERKS.map(p => (
-                  <li key={p} className="flex items-start gap-2">
-                    <Check size={11} className="text-amber-400 mt-0.5 shrink-0" />
-                    <span className="text-xs text-neutral-300 leading-snug">{p}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
 
             {/* CTA */}
-            <div className="px-5 pb-6 space-y-2">
-              {error && <p className="text-xs text-red-400 text-center break-all">{error}</p>}
-
+            <div className="px-5 pb-5 space-y-2">
               {alreadyBeta ? (
                 <div className="w-full py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-                  <span className="text-emerald-400 text-sm font-medium">✓ 你已是内测用户</span>
+                  <span className="text-emerald-400 text-sm font-black">✓ 你已是内测用户</span>
                 </div>
               ) : isFull ? (
                 <div className="w-full py-3 rounded-xl bg-neutral-800 text-center">
@@ -184,26 +173,21 @@ export function UpgradeModal({ open, onClose, reason, onBetaClaimed }: UpgradeMo
                 </div>
               ) : (
                 <button
-                  onClick={handleClaim}
-                  disabled={claiming}
-                  className="w-full py-3 rounded-xl bg-amber-500 text-neutral-900 text-sm font-bold hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                  onClick={handleClaimClick}
+                  className="w-full py-3.5 rounded-xl bg-amber-500 text-black text-sm font-black hover:bg-amber-400 active:scale-[0.98] transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
                 >
-                  {claiming ? (
-                    <><Zap size={14} className="animate-pulse" />申请中…</>
-                  ) : (
-                    <>⚡️ 一键抢占内测名额</>
-                  )}
+                  🛑 立即一键抢占内测名额（剩余 {remaining}/{BETA_TOTAL}）
                 </button>
               )}
 
               <p className="text-center text-[10px] text-neutral-700 leading-relaxed">
-                MindWeaver AI is an independent platform. AI functionalities are powered by third-party APIs (Claude & DeepSeek).
-                Not affiliated with Anthropic or DeepSeek.
+                MindWeaver AI is independent. Powered by third-party APIs (Claude & DeepSeek). Not affiliated with Anthropic or DeepSeek.
               </p>
             </div>
           </>
         )}
       </div>
     </div>
+    </>
   )
 }

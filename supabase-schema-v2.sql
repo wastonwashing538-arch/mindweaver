@@ -36,13 +36,26 @@ ALTER TABLE user_quota
   ADD COLUMN IF NOT EXISTS subscription_expires_at  TIMESTAMPTZ;
 
 -- ─────────────────────────── Beta User Support ───────────────────────────────
--- Run this to enable the beta waitlist mechanism
 
 ALTER TABLE user_quota
   ADD COLUMN IF NOT EXISTS is_beta_user BOOLEAN NOT NULL DEFAULT false;
 
--- Index for fast beta count queries
 CREATE INDEX IF NOT EXISTS idx_user_quota_is_beta_user ON user_quota(is_beta_user) WHERE is_beta_user = true;
+
+-- Registration profiles table (stores user info collected during beta signup)
+CREATE TABLE IF NOT EXISTS beta_profiles (
+  user_id         UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email           TEXT,
+  nickname        TEXT,
+  twitter_handle  TEXT,
+  use_case        TEXT,
+  referral_source TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Allow users to read/write their own profile; admin can read all
+ALTER TABLE beta_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own profile" ON beta_profiles
+  FOR ALL USING (auth.uid() = user_id);
 
 -- ─────────────────────────── Atomic increment function ───────────────────────
 -- Atomic increment function (handles daily reset in one SQL statement)
